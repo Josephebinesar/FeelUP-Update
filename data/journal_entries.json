@@ -1,0 +1,159 @@
+[
+  {
+    "id": "1701523200001",
+    "user_email": "user@example.com",
+    "title": "Morning Reflections",
+    "content": "Started my day with 10 minutes of meditation. I'm learning to appreciate these quiet moments before the day gets busy. Setting an intention to be more present today.",
+    "mood_tag": "Calm",
+    "mood_emoji": "😌",
+    "energy_level": 7,
+    "tags": [
+      "meditation",
+      "morning routine",
+      "mindfulness"
+    ],
+    "is_gratitude": false,
+    "can_convert_to_post": true,
+    "created_at": "2025-12-01T07:00:00.000Z",
+    "updated_at": "2025-12-01T07:00:00.000Z"
+  },
+  {
+    "id": "1701609600001",
+    "user_email": "user@example.com",
+    "title": null,
+    "content": "Grateful for my morning coffee, the supportive text from my friend, and the beautiful sunshine streaming through my window. Small moments of joy make the biggest difference.",
+    "mood_tag": "Grateful",
+    "mood_emoji": "🙏",
+    "energy_level": 8,
+    "tags": [
+      "gratitude",
+      "friendship",
+      "simple pleasures"
+    ],
+    "is_gratitude": true,
+    "can_convert_to_post": false,
+    "created_at": "2025-12-01T08:30:00.000Z",
+    "updated_at": "2025-12-01T08:30:00.000Z"
+  },
+  {
+    "id": "1701696000001",
+    "user_email": "user@example.com",
+    "title": "Weekly Review",
+    "content": "This week had its ups and downs, but I'm proud of how I handled the challenges. Made progress on my fitness goals and had some great conversations with friends. Learning to celebrate small wins.",
+    "mood_tag": "Thoughtful",
+    "mood_emoji": "🤔",
+    "energy_level": 6,
+    "tags": [
+      "reflection",
+      "progress",
+      "personal growth"
+    ],
+    "is_gratitude": false,
+    "can_convert_to_post": true,
+    "created_at": "2025-12-01T21:00:00.000Z",
+    "updated_at": "2025-12-01T21:00:00.000Z"
+  },
+  {
+    "id": "1701782400001",
+    "user_email": "user@example.com",
+    "title": null,
+    "content": "Thankful for my health, my family's support, and the opportunity to learn new things every day. Even during difficult times, there's always something to appreciate.",
+    "mood_tag": "Grateful",
+    "mood_emoji": "🙏",
+    "energy_level": 7,
+    "tags": [
+      "health",
+      "family",
+      "learning"
+    ],
+    "is_gratitude": true,
+    "can_convert_to_post": false,
+    "created_at": "2025-12-02T07:15:00.000Z",
+    "updated_at": "2025-12-02T07:15:00.000Z"
+  },
+  {
+    "id": "1701868800001",
+    "user_email": "user@example.com",
+    "title": "Study Session Success",
+    "content": "Had a productive study session today. Using the Pomodoro technique really helps with focus. Feeling more confident about the upcoming exam. Time management is definitely improving!",
+    "mood_tag": "Happy",
+    "mood_emoji": "😊",
+    "energy_level": 8,
+    "tags": [
+      "studying",
+      "productivity",
+      "time management",
+      "confidence"
+    ],
+    "is_gratitude": false,
+    "can_convert_to_post": true,
+    "created_at": "2025-12-02T14:30:00.000Z",
+    "updated_at": "2025-12-02T14:30:00.000Z"
+  },
+  {
+    "id": "1764650811693",
+    "user_email": "manyainfinite@gmail.com",
+    "title": "Infosys Drive",
+    "content": "Attended the infosys drive, and got to know the type for DSA Questions they ask.",
+    "mood_tag": "Reflective",
+    "mood_emoji": "🌙",
+    "energy_level": 5,
+    "tags": [
+      "goals"
+    ],
+    "is_gratitude": false,
+    "can_convert_to_post": false,
+    "created_at": "2025-12-02T04:46:51.693Z",
+    "updated_at": "2025-12-02T04:46:51.693Z"
+  },
+  {
+    "id": "1764652814734",
+    "user_email": "manyainfinite@gmail.com",
+    "title": null,
+    "content": "Grateful for the opportunity to attend the project expo, where I learned a lot of things.",
+    "mood_tag": "Grateful",
+    "mood_emoji": "🙏",
+    "energy_level": 5,
+    "tags": [
+      "grateful"
+    ],
+    "is_gratitude": true,
+    "can_convert_to_post": false,
+    "created_at": "2025-12-02T05:20:14.734Z",
+    "updated_at": "2025-12-02T05:20:14.734Z"
+  },
+  {
+    "id": "1767504313541",
+    "user_email": "manyainfinite@gmail.com",
+    "title": "2026!",
+    "content": "Got new resolutions to be done for this year.",
+    "image_url": null,
+    "mood_tag": "Hopeful",
+    "mood_emoji": "🌟",
+    "energy_level": 5,
+    "tags": [
+      "grateful",
+      "reflection",
+      "goals"
+    ],
+    "is_gratitude": false,
+    "can_convert_to_post": false,
+    "created_at": "2026-01-04T05:25:13.541Z",
+    "updated_at": "2026-01-04T05:25:13.541Z"
+  },
+  {
+    "id": "1767538880254",
+    "user_email": "manyainfinite@gmail.com",
+    "title": "Recommended sleep time",
+    "content": "I always wonder what is the apt time to sleep everyday and do they actually influence our whole day?",
+    "image_url": null,
+    "mood_tag": "Thoughtful",
+    "mood_emoji": "🤔",
+    "energy_level": 5,
+    "tags": [],
+    "is_gratitude": false,
+    "can_convert_to_post": true,
+    "created_at": "2026-01-04T15:01:20.254Z",
+    "updated_at": "2026-01-04T15:01:40.605Z"
+  }
+]

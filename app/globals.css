@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Intentionally light-only theme: no dark-mode overrides to keep the UI calm and bright */
+
+/* Prevent loading flashes and improve perceived performance */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  /* Very light, calming background — soft blue to white */
+  background: linear-gradient(180deg, #f7fbfc 0%, #ffffff 100%);
+  color: var(--foreground);
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial;
+}
+
+/* Loading skeleton for better UX */
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Calm theme tokens */
+:root {
+  --feelup-accent: #7dd3fc; /* light blue */
+  --feelup-accent-2: #c7f9f9; /* pale aqua */
+  --feelup-muted: #6b7a89; /* muted text - slightly warmer */
+  --radius-md: 12px;
+  --shadow-soft: 0 6px 18px rgba(37, 150, 190, 0.06);
+}
+
+/* Brand palette */
+:root {
+  --brand-blue: #2596be;
+  --brand-blue-light: #93cae3;
+  --brand-pink: #ff7ea8;
+  --brand-peach: #ffa3ae;
+  --brand-black: #071421; /* deep slate for better readability without heavy black */
+  --brand-white: #ffffff;
+
+  /* Map legacy variables to new palette */
+  --feelup-accent: var(--brand-blue);
+  --feelup-accent-2: var(--brand-blue-light);
+  --feelup-muted: #6b7a89;
+}
+
+/* Input helpers */
+.input-field {
+  background: var(--brand-white);
+  border: 1px solid rgba(37, 150, 190, 0.12);
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(37, 150, 190, 0.03);
+  color: var(--brand-black);
+}
+.input-field:focus {
+  outline: none;
+  box-shadow: 0 6px 24px rgba(37, 150, 190, 0.12);
+  border-color: var(--brand-blue);
+}
+
+/* Logo helpers */
+.logo-img {
+  width: var(--logo-size, 40px);
+  height: var(--logo-size, 40px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  background: linear-gradient(
+    180deg,
+    rgba(146, 199, 222, 0.06),
+    rgba(255, 160, 170, 0.03)
+  );
+  display: inline-block;
+}
+.logo-text {
+  color: var(--brand-blue);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.2px;
+}
+
+/* Buttons */
+.btn-primary {
+  background: var(--brand-blue);
+  color: var(--brand-white);
+  border: none;
+  box-shadow: 0 8px 24px rgba(37, 150, 190, 0.12);
+  border-radius: 12px;
+  padding: 0.6rem 0.9rem;
+}
+.btn-secondary {
+  background: transparent;
+  border: 1px solid rgba(37, 150, 190, 0.12);
+  color: var(--brand-blue);
+  border-radius: 12px;
+  padding: 0.5rem 0.8rem;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--feelup-muted);
+  border: none;
+}
+
+/* Subtle animations */
+.fade-in {
+  animation: fadeIn 400ms ease-out both;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.soft-glow {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+/* Humanized UI tokens and helpers */
+:root {
+  --ui-radius: 14px;
+  --ui-radius-sm: 10px;
+  --space-1: 6px;
+  --space-2: 12px;
+  --space-3: 18px;
+  --space-4: 24px;
+  --text-muted: #68707a;
+  --card-bg: linear-gradient(180deg, #ffffff, #fbfdff);
+  --surface-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+/* Card / post surface for social feed */
+.surface-card {
+  background: var(--card-bg);
+  border-radius: var(--ui-radius);
+  box-shadow: var(--surface-shadow);
+  border: 1px solid rgba(15, 23, 42, 0.03);
+}
+
+/* Avatar */
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(90deg, #e6f7ff, #fff0f6);
+  border: 1px solid rgba(15, 23, 42, 0.04);
+}
+
+/* Post header */
+.post-meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Subtle readable body text */
+.text-body {
+  color: var(--text-muted);
+  line-height: 1.5;
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1764652000407",
+    "follower_email": "manyainfinite@gmail.com",
+    "following_email": "alex.rodriguez@example.com",
+    "created_at": "2025-12-02T05:06:40.407Z"
+  },
+  {
+    "id": "1764652409040",
+    "follower_email": "manyainfinite@gmail.com",
+    "following_email": "sarah.chen@example.com",
+    "created_at": "2025-12-02T05:13:29.040Z"
+  }
+]

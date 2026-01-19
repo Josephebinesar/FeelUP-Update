@@ -1,0 +1,456 @@
+[
+  {
+    "id": "1764650671743",
+    "content": "Great weather",
+    "mood": "Calm",
+    "mood_emoji": "😌",
+    "mood_color": "#60a5fa",
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "manyainfinite@gmail.com",
+    "created_at": "2025-12-02T04:44:31.744Z",
+    "profiles": {
+      "full_name": "manyainfinite",
+      "avatar_url": null
+    },
+    "updated_at": "2026-01-03T06:05:15.589Z"
+  },
+  {
+    "id": "1767265813103",
+    "content": "On the day of new years, I wish everyone a happy near and a prosperous year ahead!",
+    "mood": "Happy",
+    "mood_emoji": "😊",
+    "mood_color": "#fbbf24",
+    "visibility": "public",
+    "anonymous": true,
+    "owner_email": null,
+    "created_at": "2026-01-01T11:10:13.103Z",
+    "profiles": null
+  },
+  {
+    "id": "1767266594941",
+    "content": "Happy new year guys!",
+    "mood": "Excited",
+    "mood_emoji": "🤩",
+    "mood_color": "#f472b6",
+    "visibility": "friends",
+    "anonymous": true,
+    "owner_email": null,
+    "created_at": "2026-01-01T11:23:14.941Z",
+    "profiles": null
+  },
+  {
+    "id": "1767412486276",
+    "content": "New year resolutions??",
+    "mood": "Thoughtful",
+    "mood_emoji": "🤔",
+    "mood_color": "#a78bfa",
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "manyainfinite@gmail.com",
+    "created_at": "2026-01-03T03:54:46.276Z",
+    "profiles": {
+      "full_name": "manyainfinite",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767420289876",
+    "content": "A whole world of possibilities is out there- are you ready to make the most of it?",
+    "image_url": "https://res.cloudinary.com/didzey2bf/image/upload/v1767420292/feelup/mood-posts/d5zb7yve7afmuaypkxcf.jpg",
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": true,
+    "owner_email": null,
+    "created_at": "2026-01-03T06:04:49.876Z",
+    "profiles": null
+  },
+  {
+    "id": "1767429341999",
+    "content": "New year resolutions??\n2026??",
+    "image_url": null,
+    "reposted_from": "1767412486276",
+    "mood": "Thoughtful",
+    "mood_emoji": "🤔",
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "manyainfinite@gmail.com",
+    "created_at": "2026-01-03T08:35:41.999Z",
+    "profiles": {
+      "full_name": "manyainfinite",
+      "avatar_url": null
+    },
+    "updated_at": "2026-01-04T05:27:20.083Z"
+  },
+  {
+    "id": "1767453960563",
+    "content": "Well I am ready to take on the new year with positivity and determination. Let's make it a great one!",
+    "image_url": "https://res.cloudinary.com/didzey2bf/image/upload/v1767453964/feelup/mood-posts/fvdmfggsqddhqki3erqn.jpg",
+    "reposted_from": null,
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": true,
+    "owner_email": null,
+    "created_at": "2026-01-03T15:26:00.563Z",
+    "profiles": {
+      "full_name": "manyainfinite",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767538958806",
+    "content": "I always wonder what is the apt time to sleep everyday and do they actually influence our whole day?",
+    "image_url": null,
+    "reposted_from": null,
+    "mood": null,
+    "mood_emoji": "🤔",
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "manyainfinite@gmail.com",
+    "created_at": "2026-01-04T15:02:38.806Z",
+    "profiles": {
+      "full_name": "manyainfinite",
+      "avatar_url": null
+    },
+    "updated_at": "2026-01-04T15:04:05.497Z"
+  },
+  {
+    "id": "1767721655224",
+    "content": "even thought i have lot of struggles its a fine day",
+    "image_url": null,
+    "reposted_from": null,
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T17:47:35.224Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767721984176",
+    "content": "I feel overwhelmed and can’t slow my thoughts",
+    "image_url": null,
+    "reposted_from": null,
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T17:53:04.176Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767722476799",
+    "content": "I feel overwhelmed and stressed about my future",
+    "image_url": null,
+    "reposted_from": null,
+    "mood": "Anxious",
+    "mood_emoji": null,
+    "mood_color": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T18:01:16.799Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767723543026",
+    "content": "I feel overwhelmed and stressed about my future",
+    "image_url": null,
+    "reposted_from": null,
+    "mood": "Anxious",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.9,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T18:19:03.026Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767723554154",
+    "content": "im hungry",
+    "image_url": null,
+    "reposted_from": null,
+    "mood": "Neutral",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.4,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T18:19:14.154Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767724552021",
+    "content": "im hungry",
+    "mood": "Neutral",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.7,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T18:35:52.021Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767724553612",
+    "content": "im hungry",
+    "mood": "Neutral",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.7,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T18:35:53.612Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767724607174",
+    "content": "today i went to smiti and i have proposed her and she rejected me",
+    "mood": "Sad",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.85,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-06T18:36:47.174Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767845850041",
+    "content": "hi today is good da",
+    "mood": "Happy",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.85,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-08T04:17:30.041Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1767845850837",
+    "content": "hi today is good da",
+    "mood": "Happy",
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": true,
+    "ai_confidence": 0.85,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-08T04:17:30.837Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768142989629",
+    "content": "good",
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-11T14:49:49.629Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768236081872",
+    "content": "hi",
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-12T16:41:21.872Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768237045032",
+    "content": "hi",
+    "mood": "Happy",
+    "mood_emoji": "😊",
+    "mood_color": null,
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-12T16:57:25.032Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768322285050",
+    "content": "hi",
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": true,
+    "owner_email": null,
+    "created_at": "2026-01-13T16:38:05.050Z",
+    "profiles": null
+  },
+  {
+    "id": "1768322349312",
+    "content": "hi",
+    "mood": null,
+    "mood_emoji": null,
+    "mood_color": null,
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": null,
+    "created_at": "2026-01-13T16:39:09.312Z",
+    "profiles": {
+      "full_name": "Anonymous User",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768322525810",
+    "content": "hi",
+    "mood": "Happy",
+    "mood_emoji": "😊",
+    "mood_color": null,
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": null,
+    "created_at": "2026-01-13T16:42:05.810Z",
+    "profiles": {
+      "full_name": "Anonymous User",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768749848296",
+    "content": "hi",
+    "mood": "Happy",
+    "mood_emoji": "😊",
+    "mood_color": "#fbbf24",
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": "josephebinesar7@gmail.com",
+    "created_at": "2026-01-18T15:24:08.296Z",
+    "profiles": {
+      "full_name": "josephebinesar7",
+      "avatar_url": null
+    }
+  },
+  {
+    "id": "1768750074228",
+    "content": "hi im good",
+    "mood": "Happy",
+    "mood_emoji": "😊",
+    "mood_color": "#fbbf24",
+    "ai_detected": false,
+    "ai_confidence": 0,
+    "image_url": null,
+    "reposted_from": null,
+    "visibility": "public",
+    "anonymous": false,
+    "owner_email": null,
+    "created_at": "2026-01-18T15:27:54.228Z",
+    "profiles": {
+      "full_name": "Anonymous User",
+      "avatar_url": null
+    }
+  }
+]
