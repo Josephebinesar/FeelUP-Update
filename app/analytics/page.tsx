@@ -4,9 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "../../components/Navbar";
 import { BarChart3, Zap } from "lucide-react";
-
 /* ---------------- MOCK DATA ---------------- */
-
 const generateMockMoodData = () => {
   const moods = [
     "Happy",
@@ -18,13 +16,10 @@ const generateMockMoodData = () => {
     "Anxious",
     "Tired",
   ];
-
   const last30Days = [];
-
   for (let i = 29; i >= 0; i--) {
     const date = new Date();
     date.setDate(date.getDate() - i);
-
     last30Days.push({
       date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       mood: moods[Math.floor(Math.random() * moods.length)],
@@ -32,10 +27,8 @@ const generateMockMoodData = () => {
       goals_completed: Math.floor(Math.random() * 4),
     });
   }
-
   return last30Days;
 };
-
 const moodColors: Record<string, string> = {
   Happy: "#fbbf24",
   Calm: "#60a5fa",
@@ -46,12 +39,9 @@ const moodColors: Record<string, string> = {
   Anxious: "#fb7185",
   Tired: "#6b7280",
 };
-
 /* ---------------- PAGE ---------------- */
-
 export default function AnalyticsPage() {
   const router = useRouter();
-
   const [mounted, setMounted] = useState(false);
   const [timeframe, setTimeframe] = useState<"week" | "month" | "quarter">("month");
   const [moodData, setMoodData] = useState<any[]>([]);
@@ -63,17 +53,14 @@ export default function AnalyticsPage() {
     avgMoodScore: 0,
     avgEnergyLevel: 0,
   });
-
   useEffect(() => {
     setMounted(true);
   }, []);
 
   const loadAnalytics = useCallback(() => {
     if (!mounted) return;
-
     const data = generateMockMoodData();
     setMoodData(data);
-
     const positiveDays = data.filter(d =>
       ["Happy", "Calm", "Excited", "Grateful"].includes(d.mood)
     ).length;
@@ -85,7 +72,6 @@ export default function AnalyticsPage() {
       (sum, d) => sum + d.goals_completed,
       0
     );
-
     setStats({
       totalGoals: completedGoals + 15,
       completedGoals,
@@ -99,22 +85,17 @@ export default function AnalyticsPage() {
   useEffect(() => {
     loadAnalytics();
   }, [loadAnalytics, timeframe]);
-
   const moodCounts = moodData.reduce((acc: any, d) => {
     acc[d.mood] = (acc[d.mood] || 0) + 1;
     return acc;
   }, {});
-
   const topMood = Object.entries(moodCounts).sort(
     ([, a]: any, [, b]: any) => b - a
   )[0];
-
   /* ---------------- UI ---------------- */
-
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
-
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
@@ -129,7 +110,6 @@ export default function AnalyticsPage() {
               Insights from your wellness journey
             </p>
           </div>
-
           <div className="bg-white rounded-xl p-2 shadow">
             {(["week", "month", "quarter"] as const).map((p) => (
               <button
@@ -146,7 +126,6 @@ export default function AnalyticsPage() {
             ))}
           </div>
         </div>
-
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
           {[
@@ -163,7 +142,6 @@ export default function AnalyticsPage() {
             </div>
           ))}
         </div>
-
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-8 rounded-xl shadow">
@@ -184,12 +162,10 @@ export default function AnalyticsPage() {
               </div>
             ))}
           </div>
-
           <div className="bg-white p-8 rounded-xl shadow">
             <h2 className="font-bold mb-4 flex items-center gap-2">
               <Zap className="w-5 h-5" /> Mood Distribution
             </h2>
-
             {Object.entries(moodCounts).map(([mood, count]: any) => (
               <div key={mood} className="flex items-center gap-3 mb-2">
                 <span className="w-20 text-sm">{mood}</span>
