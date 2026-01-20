@@ -4,7 +4,15 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import StreakDisplay from "@/components/StreakDisplay";
-import { Target, Flame, CheckCircle2, Trophy } from "lucide-react";
+import {
+  Target,
+  Flame,
+  CheckCircle2,
+  Trophy,
+  Share2,
+  Plus,
+  Trash2,
+} from "lucide-react";
 
 /* -------------------- CONFIG -------------------- */
 
@@ -18,29 +26,65 @@ const goalCategories = [
 ];
 
 const completionMoods = [
-  { value: "accomplished", emoji: "🎉", label: "Accomplished" },
-  { value: "proud", emoji: "😊", label: "Proud" },
-  { value: "relieved", emoji: "😌", label: "Relieved" },
-  { value: "energized", emoji: "⚡", label: "Energized" },
-  { value: "calm", emoji: "🕊️", label: "Calm" },
-  { value: "grateful", emoji: "🙏", label: "Grateful" },
+  { value: "accomplished", emoji: "🎉", label: "Accomplished", color: "#fbbf24" },
+  { value: "proud", emoji: "😊", label: "Proud", color: "#f472b6" },
+  { value: "relieved", emoji: "😌", label: "Relieved", color: "#60a5fa" },
+  { value: "energized", emoji: "⚡", label: "Energized", color: "#34d399" },
+  { value: "calm", emoji: "🕊️", label: "Calm", color: "#60a5fa" },
+  { value: "grateful", emoji: "🙏", label: "Grateful", color: "#34d399" },
 ];
+
+type Visibility = "public" | "followers" | "mutuals";
+
+type CompletedDraft = {
+  goal: any;
+  mood: string; // completion_moods.value
+  reflection: string;
+};
 
 /* -------------------- PAGE -------------------- */
 
 export default function GoalsPage() {
   const router = useRouter();
-
-  // ✅ SAFE SINGLETON (matches lib/supabaseClient.ts)
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
 
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
+
   const [goals, setGoals] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
+
   const [showAddGoal, setShowAddGoal] = useState(false);
-  const [completingGoal, setCompletingGoal] = useState<any>(null);
+  const [bulkMode, setBulkMode] = useState(false);
+
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
+
+  // ✅ prevent double click completes
+  const [completingIds, setCompletingIds] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  // ✅ optional reflection modal after instant complete
+  const [completionModal, setCompletionModal] = useState<CompletedDraft | null>(
+    null
+  );
+
+  // Share completed goal → Mood Feed (optional)
+  const [shareToFeed, setShareToFeed] = useState(false);
+  const [shareVisibility, setShareVisibility] = useState<Visibility>("public");
+  const [shareAnonymous, setShareAnonymous] = useState(false);
+
+  /* -------------------- HELPERS -------------------- */
+
+  const todayISO = () => new Date().toISOString().split("T")[0];
+
+  const completedGoals = goals.filter((g) => g.completed_at);
+  const pendingGoals = goals.filter((g) => !g.completed_at);
+
+  const completionRate =
+    goals.length > 0
+      ? Math.round((completedGoals.length / goals.length) * 100)
+      : 0;
 
   /* -------------------- AUTH -------------------- */
 
@@ -51,13 +95,13 @@ export default function GoalsPage() {
       const { data } = await supabase.auth.getUser();
       if (!mounted) return;
 
-      if (!data.user) {
+      if (!data?.user) {
         router.replace("/login");
         return;
       }
 
       setUser(data.user);
-      setSelectedDate(new Date().toISOString().split("T")[0]);
+      setSelectedDate(todayISO());
       setLoading(false);
     }
 
@@ -74,9 +118,7 @@ export default function GoalsPage() {
       if (!user?.email) return;
 
       const res = await fetch(
-        `/api/goals?user_email=${encodeURIComponent(
-          user.email
-        )}&date=${date}`
+        `/api/goals?user_email=${encodeURIComponent(user.email)}&date=${date}`
       );
 
       if (!res.ok) return;
@@ -88,18 +130,10 @@ export default function GoalsPage() {
   );
 
   useEffect(() => {
-    if (user?.email) loadGoals();
-  }, [user?.email, loadGoals]);
+    if (user?.email && selectedDate) loadGoals(selectedDate);
+  }, [user?.email, selectedDate, loadGoals]);
 
-  /* -------------------- HELPERS -------------------- */
-
-  const completedGoals = goals.filter((g) => g.completed_at);
-  const pendingGoals = goals.filter((g) => !g.completed_at);
-
-  const completionRate =
-    goals.length > 0
-      ? Math.round((completedGoals.length / goals.length) * 100)
-      : 0;
+  /* -------------------- DATE -------------------- */
 
   const changeDateBy = async (days: number) => {
     const d = new Date(selectedDate);
@@ -109,10 +143,12 @@ export default function GoalsPage() {
     await loadGoals(next);
   };
 
-  /* -------------------- CRUD -------------------- */
+  /* -------------------- ADD GOAL -------------------- */
 
   const addGoal = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user?.email) return;
+
     const fd = new FormData(e.currentTarget);
 
     await fetch("/api/goals", {
@@ -120,22 +156,163 @@ export default function GoalsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_email: user.email,
-        title: fd.get("title"),
-        description: fd.get("description"),
-        category: fd.get("category"),
+        title: String(fd.get("title") || "").trim(),
+        description: String(fd.get("description") || "").trim(),
+        category: String(fd.get("category") || ""),
         target_date: selectedDate,
       }),
     });
 
     setShowAddGoal(false);
-    loadGoals();
+    loadGoals(selectedDate);
   };
 
-  const completeGoal = async (
+  const addGoalsBulk = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user?.email) return;
+
+    const fd = new FormData(e.currentTarget);
+    const raw = String(fd.get("bulk") || "");
+    const category = String(fd.get("category") || "");
+    const description = String(fd.get("description") || "");
+
+    const titles = raw
+      .split("\n")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (titles.length === 0) {
+      alert("Add at least 1 goal (one per line)");
+      return;
+    }
+
+    for (const title of titles) {
+      const res = await fetch("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_email: user.email,
+          title,
+          description,
+          category,
+          target_date: selectedDate,
+        }),
+      });
+
+      if (!res.ok) break;
+    }
+
+    setShowAddGoal(false);
+    setBulkMode(false);
+    loadGoals(selectedDate);
+  };
+
+  /* -------------------- DELETE GOAL -------------------- */
+
+  const deleteGoal = async (id: string) => {
+    if (!user?.email) return;
+    if (!confirm("Delete this goal?")) return;
+
+    await fetch(`/api/goals?goal_id=${id}&user_email=${user.email}`, {
+      method: "DELETE",
+    });
+
+    loadGoals(selectedDate);
+  };
+
+  /* -------------------- SHARE TO FEED -------------------- */
+
+  const shareCompletedGoalToFeed = async (
     goal: any,
-    mood: string,
+    moodValue: string,
     reflection: string
   ) => {
+    if (!user?.id) throw new Error("User not ready");
+
+    const moodMeta =
+      completionMoods.find((m) => m.value === moodValue) || completionMoods[0];
+
+    const lines: string[] = [];
+    lines.push(`✅ Completed my goal: ${goal.title}`);
+    if (goal.category) lines.push(`Category: ${goal.category}`);
+    if (reflection?.trim()) lines.push(`Reflection: ${reflection.trim()}`);
+
+    const content = lines.join("\n");
+
+    const { error } = await supabase.from("mood_posts").insert({
+      owner_id: user.id,
+      content,
+      mood: moodMeta.label,
+      mood_emoji: moodMeta.emoji,
+      mood_color: moodMeta.color,
+      anonymous: shareAnonymous,
+      visibility: shareVisibility,
+      image_url: null,
+    });
+
+    if (error) throw new Error(error.message || "Failed to share to feed");
+  };
+
+  /* -------------------- INSTANT COMPLETE (BEST UX) -------------------- */
+
+  const instantlyCompleteGoal = async (goal: any) => {
+    if (!user?.email) return;
+
+    // block double click
+    if (completingIds[goal.id]) return;
+    setCompletingIds((p) => ({ ...p, [goal.id]: true }));
+
+    // optimistic UI: mark completed locally immediately
+    setGoals((prev) =>
+      prev.map((g) =>
+        g.id === goal.id ? { ...g, completed_at: new Date().toISOString() } : g
+      )
+    );
+
+    // default mood for fast completion
+    const defaultMood = "accomplished";
+
+    // save to DB
+    const res = await fetch("/api/goals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        goal_id: goal.id,
+        user_email: user.email,
+        completed: true,
+        mood_at_completion: defaultMood,
+        reflection_note: "",
+      }),
+    });
+
+    setCompletingIds((p) => {
+      const copy = { ...p };
+      delete copy[goal.id];
+      return copy;
+    });
+
+    if (!res.ok) {
+      // rollback optimistic update
+      alert("Failed to complete goal");
+      await loadGoals(selectedDate);
+      return;
+    }
+
+    setStreakRefreshKey((k) => k + 1);
+
+    // open optional reflection/share modal (user can skip)
+    setCompletionModal({ goal, mood: defaultMood, reflection: "" });
+
+    // refresh list to be accurate
+    loadGoals(selectedDate);
+  };
+
+  const saveReflectionAndShare = async () => {
+    if (!completionModal || !user?.email) return;
+
+    const { goal, mood, reflection } = completionModal;
+
+    // update reflection/mood in DB (goal already completed)
     await fetch("/api/goals", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -148,20 +325,21 @@ export default function GoalsPage() {
       }),
     });
 
-    setCompletingGoal(null);
-    setStreakRefreshKey((k) => k + 1);
-    loadGoals();
-  };
+    if (shareToFeed) {
+      try {
+        await shareCompletedGoalToFeed(goal, mood, reflection);
+      } catch (e: any) {
+        alert(e?.message || "Failed to share to feed");
+      }
+    }
 
-  const deleteGoal = async (id: string) => {
-    if (!confirm("Delete this goal?")) return;
+    // reset & close
+    setCompletionModal(null);
+    setShareToFeed(false);
+    setShareVisibility("public");
+    setShareAnonymous(false);
 
-    await fetch(
-      `/api/goals?goal_id=${id}&user_email=${user.email}`,
-      { method: "DELETE" }
-    );
-
-    loadGoals();
+    loadGoals(selectedDate);
   };
 
   /* -------------------- UI -------------------- */
@@ -202,75 +380,313 @@ export default function GoalsPage() {
 
       {/* DATE */}
       <div className="flex items-center gap-2 mb-6">
-        <button onClick={() => changeDateBy(-1)}>◀</button>
+        <button
+          onClick={() => changeDateBy(-1)}
+          className="px-2 py-1 rounded border bg-white"
+        >
+          ◀
+        </button>
+
         <input
           type="date"
+          className="border rounded px-2 py-1 bg-white"
           value={selectedDate}
           onChange={(e) => {
             setSelectedDate(e.target.value);
             loadGoals(e.target.value);
           }}
         />
-        <button onClick={() => changeDateBy(1)}>▶</button>
+
+        <button
+          onClick={() => changeDateBy(1)}
+          className="px-2 py-1 rounded border bg-white"
+        >
+          ▶
+        </button>
       </div>
 
       {/* ADD GOAL */}
       {!showAddGoal ? (
-        <button onClick={() => setShowAddGoal(true)}>+ Add Goal</button>
+        <button
+          onClick={() => {
+            setShowAddGoal(true);
+            setBulkMode(false);
+          }}
+          className="mb-6 px-4 py-2 rounded bg-blue-600 text-white inline-flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" /> Add Goal
+        </button>
       ) : (
-        <form onSubmit={addGoal} className="space-y-3 mb-6">
-          <input name="title" required placeholder="Goal title" />
-          <textarea name="description" placeholder="Optional notes" />
-          <select name="category" required>
-            {goalCategories.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-          <button type="submit">Save</button>
-        </form>
+        <div className="mb-6 bg-white p-4 rounded-xl border">
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-semibold">Add goals</div>
+            <button
+              onClick={() => setBulkMode((v) => !v)}
+              className="text-sm text-blue-600 hover:underline"
+              type="button"
+            >
+              {bulkMode ? "Switch to single add" : "Bulk add (multiple)"}
+            </button>
+          </div>
+
+          {!bulkMode ? (
+            <form onSubmit={addGoal} className="space-y-3">
+              <input
+                name="title"
+                required
+                placeholder="Goal title"
+                className="w-full border rounded px-3 py-2"
+              />
+              <textarea
+                name="description"
+                placeholder="Optional notes"
+                className="w-full border rounded px-3 py-2"
+              />
+              <select
+                name="category"
+                required
+                className="w-full border rounded px-3 py-2"
+              >
+                {goalCategories.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded bg-blue-600 text-white"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddGoal(false)}
+                  className="px-4 py-2 rounded border bg-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={addGoalsBulk} className="space-y-3">
+              <textarea
+                name="bulk"
+                required
+                placeholder={"Enter one goal per line:\nStudy DSA 30 mins\nWalk 15 mins\nDrink 2L water"}
+                className="w-full border rounded px-3 py-2 min-h-[120px]"
+              />
+              <textarea
+                name="description"
+                placeholder="Optional notes (applies to all)"
+                className="w-full border rounded px-3 py-2"
+              />
+              <select
+                name="category"
+                required
+                className="w-full border rounded px-3 py-2"
+              >
+                {goalCategories.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded bg-blue-600 text-white"
+                >
+                  Add all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddGoal(false)}
+                  className="px-4 py-2 rounded border bg-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       )}
 
-      {/* GOALS */}
-      {pendingGoals.map((goal) => (
-        <div
-          key={goal.id}
-          className="bg-white p-4 rounded flex justify-between mb-2"
-        >
-          <span>{goal.title}</span>
-          <div className="flex gap-2">
-            <button onClick={() => setCompletingGoal(goal)}>✓</button>
-            <button onClick={() => deleteGoal(goal.id)}>🗑</button>
+      {/* TODAY GOALS */}
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold mb-2">
+          Today’s goals{" "}
+          <span className="text-sm text-gray-500">
+            ({pendingGoals.length} pending)
+          </span>
+        </h2>
+
+        {pendingGoals.length === 0 ? (
+          <div className="text-gray-500">
+            No pending goals for this day — add one!
+          </div>
+        ) : (
+          pendingGoals.map((goal) => (
+            <button
+              key={goal.id}
+              type="button"
+              onClick={() => instantlyCompleteGoal(goal)}
+              disabled={!!completingIds[goal.id]}
+              className="w-full text-left bg-white p-4 rounded-xl border flex items-center justify-between mb-2 hover:bg-gray-50 disabled:opacity-60"
+              title="Click to complete instantly"
+            >
+              <div>
+                <div className="font-medium">{goal.title}</div>
+                {goal.category && (
+                  <div className="text-xs text-gray-500">
+                    Category: {goal.category}
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteGoal(goal.id);
+                }}
+                className="p-2 rounded border bg-white hover:bg-gray-100"
+                title="Delete"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </button>
+          ))
+        )}
+      </div>
+
+      {/* COMPLETED */}
+      {completedGoals.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold mb-2">
+            Completed{" "}
+            <span className="text-sm text-gray-500">
+              ({completedGoals.length})
+            </span>
+          </h2>
+
+          <div className="space-y-2">
+            {completedGoals.map((g) => (
+              <div
+                key={g.id}
+                className="bg-white p-3 rounded-xl border text-sm text-gray-700"
+              >
+                ✅ {g.title}
+              </div>
+            ))}
           </div>
         </div>
-      ))}
+      )}
 
-      {/* COMPLETION MODAL */}
-      {completingGoal && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              completeGoal(
-                completingGoal,
-                fd.get("mood") as string,
-                fd.get("reflection") as string
-              );
-            }}
-            className="bg-white p-6 rounded space-y-3"
-          >
-            <select name="mood" required>
+      {/* OPTIONAL REFLECTION + SHARE MODAL */}
+      {completionModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md space-y-4 border">
+            <div className="text-lg font-semibold">
+              ✅ Completed: {completionModal.goal.title}
+            </div>
+
+            <div className="text-sm text-gray-600">
+              Want to add a reflection or share it? (Optional)
+            </div>
+
+            <select
+              className="w-full border rounded px-3 py-2"
+              value={completionModal.mood}
+              onChange={(e) =>
+                setCompletionModal((p) =>
+                  p ? { ...p, mood: e.target.value } : p
+                )
+              }
+            >
               {completionMoods.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.emoji} {m.label}
                 </option>
               ))}
             </select>
-            <textarea name="reflection" placeholder="Reflection" />
-            <button type="submit">Complete</button>
-          </form>
+
+            <textarea
+              className="w-full border rounded px-3 py-2"
+              placeholder="Reflection (optional)"
+              value={completionModal.reflection}
+              onChange={(e) =>
+                setCompletionModal((p) =>
+                  p ? { ...p, reflection: e.target.value } : p
+                )
+              }
+            />
+
+            {/* Share to Mood Feed */}
+            <div className="border rounded-lg p-3 bg-gray-50">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={shareToFeed}
+                  onChange={(e) => setShareToFeed(e.target.checked)}
+                />
+                <span className="flex items-center gap-2">
+                  <Share2 className="w-4 h-4" />
+                  Share as motivational post
+                </span>
+              </label>
+
+              {shareToFeed && (
+                <div className="mt-3 space-y-2">
+                  <select
+                    className="w-full border rounded px-3 py-2 text-sm bg-white"
+                    value={shareVisibility}
+                    onChange={(e) =>
+                      setShareVisibility(e.target.value as Visibility)
+                    }
+                  >
+                    <option value="public">Public</option>
+                    <option value="followers">Friend circle (followers)</option>
+                    <option value="mutuals">Close friends (mutuals)</option>
+                  </select>
+
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={shareAnonymous}
+                      onChange={(e) => setShareAnonymous(e.target.checked)}
+                    />
+                    Share anonymously
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  // skip modal (goal already completed)
+                  setCompletionModal(null);
+                  setShareToFeed(false);
+                  setShareVisibility("public");
+                  setShareAnonymous(false);
+                }}
+                className="px-4 py-2 rounded border bg-white"
+              >
+                Skip
+              </button>
+
+              <button
+                type="button"
+                onClick={saveReflectionAndShare}
+                className="px-4 py-2 rounded bg-blue-600 text-white"
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -289,7 +705,7 @@ function Stat({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-white rounded-xl p-4 text-center">
+    <div className="bg-white rounded-xl p-4 text-center border">
       <div className="flex justify-center mb-1">{icon}</div>
       <div className="text-xl font-bold">{children}</div>
       <div className="text-xs text-gray-500">{label}</div>
