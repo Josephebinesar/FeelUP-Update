@@ -25,22 +25,16 @@ const SUPPORTIVE_REACTIONS = [
   { key: "CHEER", label: "Cheer", emoji: "🎉" },
   { key: "SUPPORT", label: "Support", emoji: "💪" },
   { key: "HUG", label: "Hug", emoji: "🤗" },
-  { key: "LOVE", label: "Love", emoji: "❤️" }, // ✅ added
+  { key: "LOVE", label: "Love", emoji: "❤️" },
 ] as const;
 
 type ReactionKey = (typeof SUPPORTIVE_REACTIONS)[number]["key"];
-
 type Visibility = "public" | "followers" | "mutuals";
 
-/**
- * ✅ IMPORTANT FIX:
- * Your DB requires post_reactions.reaction_type (NOT NULL).
- */
+/** Your DB column */
 const REACTION_COL = "reaction_type";
 
-/**
- * ✅ profiles fk name for mood_posts
- */
+/** profiles FK name for mood_posts */
 const PROFILES_FK_REL = "mood_posts_owner_id_fkey";
 
 export default function MoodFeedPage() {
@@ -60,6 +54,7 @@ export default function MoodFeedPage() {
   const [selectedMood, setSelectedMood] = useState<any>(null);
   const [anonymous, setAnonymous] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>("public");
+  const [posting, setPosting] = useState(false);
 
   /* AI mood */
   const [detectingMood, setDetectingMood] = useState(false);
@@ -78,7 +73,7 @@ export default function MoodFeedPage() {
   const [reactionsMap, setReactionsMap] = useState<Record<string, any>>({});
   const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
 
-  /* ✅ SAVE (BOOKMARK) */
+  /* ✅ SAVE */
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
 
   /* ---------------- HELPERS ---------------- */
@@ -108,6 +103,12 @@ export default function MoodFeedPage() {
     console.error(`${label} ${code ? `[${code}]` : ""} ${msg}`);
     if (extra !== undefined) console.error(`${label} extra:`, extra);
   };
+
+  const pill = (text: string) => (
+    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] text-gray-600 bg-gray-50">
+      {text}
+    </span>
+  );
 
   /* ---------------- AUTH ---------------- */
 
@@ -157,7 +158,7 @@ export default function MoodFeedPage() {
           setSelectedMood(mood);
           setConfidence(data.confidence ?? null);
           setMoodReason(data.reason ?? null);
-          setAiDetected(true); // ✅ mark AI detected
+          setAiDetected(true);
         }
       } catch (e) {
         console.error("detect-mood error:", e);
@@ -187,11 +188,11 @@ export default function MoodFeedPage() {
       }
 
       const counts: Record<string, number> = {
-  CHEER: 0,
-  SUPPORT: 0,
-  HUG: 0,
-  LOVE: 0, // ✅ added
-};
+        CHEER: 0,
+        SUPPORT: 0,
+        HUG: 0,
+        LOVE: 0,
+      };
 
       (res.data || []).forEach((r: any) => {
         const key = r?.[REACTION_COL] as string | undefined;
@@ -221,11 +222,7 @@ export default function MoodFeedPage() {
     }
 
     if (sel.data?.id) {
-      const del = await supabase
-        .from("post_reactions")
-        .delete()
-        .eq("id", sel.data.id);
-
+      const del = await supabase.from("post_reactions").delete().eq("id", sel.data.id);
       if (del.error) logErr("toggleReaction delete error:", del.error, del);
     } else {
       const ins = await supabase.from("post_reactions").insert({
@@ -233,7 +230,6 @@ export default function MoodFeedPage() {
         user_id: user.id,
         reaction_type: reactionKey,
       });
-
       if (ins.error) logErr("toggleReaction insert error:", ins.error, ins);
     }
 
@@ -261,7 +257,6 @@ export default function MoodFeedPage() {
       (res.data || []).forEach((row: any) => {
         map[row.post_id] = true;
       });
-
       setSavedMap(map);
     },
     [supabase, user]
@@ -316,8 +311,7 @@ export default function MoodFeedPage() {
       anonymous: false,
       visibility: "public",
       owner_id: user.id,
-      repost_of: post.id, // ✅ points to original
-      // no AI fields for repost by default
+      repost_of: post.id,
       ai_detected: false,
       ai_confidence: null,
       ai_reason: null,
@@ -397,31 +391,16 @@ export default function MoodFeedPage() {
       }
 
       const list = res.data || [];
-      const userIds = Array.from(
-        new Set(list.map((c: any) => c.user_id).filter(Boolean))
-      );
+      const userIds = Array.from(new Set(list.map((c: any) => c.user_id).filter(Boolean)));
 
       let profilesById: Record<string, any> = {};
       if (userIds.length > 0) {
-        const profRes = await supabase
-          .from("profiles")
-          .select("id, full_name, username")
-          .in("id", userIds);
-
-        if (profRes.error) {
-          logErr("LOAD COMMENT PROFILES ERROR:", profRes.error, profRes);
-        } else {
-          profilesById = Object.fromEntries(
-            (profRes.data || []).map((p: any) => [p.id, p])
-          );
-        }
+        const profRes = await supabase.from("profiles").select("id, full_name, username").in("id", userIds);
+        if (profRes.error) logErr("LOAD COMMENT PROFILES ERROR:", profRes.error, profRes);
+        else profilesById = Object.fromEntries((profRes.data || []).map((p: any) => [p.id, p]));
       }
 
-      const merged = list.map((c: any) => ({
-        ...c,
-        profiles: profilesById[c.user_id] || null,
-      }));
-
+      const merged = list.map((c: any) => ({ ...c, profiles: profilesById[c.user_id] || null }));
       setComments((p) => ({ ...p, [postId]: merged }));
     },
     [supabase]
@@ -456,76 +435,67 @@ export default function MoodFeedPage() {
   /* ---------------- CREATE POST ---------------- */
 
   const submitPost = async () => {
-    if (!user) {
-      alert("User not ready. Please refresh.");
-      return;
-    }
+    if (!user) return alert("User not ready. Please refresh.");
+    if (!selectedMood) return alert("Please select a mood");
 
-    if (!selectedMood) {
-      alert("Please select a mood");
-      return;
-    }
+    setPosting(true);
 
-    let image_url: string | null = null;
+    try {
+      let image_url: string | null = null;
 
-    if (imageFile) {
-      const path = `${user.id}/${Date.now()}_${imageFile.name}`;
+      if (imageFile) {
+        const path = `${user.id}/${Date.now()}_${imageFile.name}`;
+        const up = await supabase.storage.from("mood-images").upload(path, imageFile, { upsert: false });
 
-      const up = await supabase.storage
-        .from("mood-images")
-        .upload(path, imageFile, { upsert: false });
+        if (up.error) {
+          alert("Failed to upload image: " + up.error.message);
+          logErr("Image upload error:", up.error, up);
+          return;
+        }
 
-      if (up.error) {
-        alert("Failed to upload image: " + up.error.message);
-        logErr("Image upload error:", up.error, up);
+        image_url = supabase.storage.from("mood-images").getPublicUrl(up.data.path).data.publicUrl;
+      }
+
+      const postData: any = {
+        content: content.trim() ? content.trim() : null,
+        mood: selectedMood.label,
+        mood_emoji: selectedMood.emoji,
+        mood_color: selectedMood.color,
+        anonymous,
+        visibility,
+        owner_id: user.id,
+        image_url,
+        ai_detected: aiDetected,
+        ai_confidence: confidence,
+        ai_reason: moodReason,
+        repost_of: null,
+      };
+
+      const ins = await supabase.from("mood_posts").insert(postData);
+
+      if (ins.error) {
+        alert(ins.error.message || "Failed to share post");
+        logErr("Post insert error:", ins.error, ins);
         return;
       }
 
-      if (up.data?.path) {
-        image_url = supabase.storage
-          .from("mood-images")
-          .getPublicUrl(up.data.path).data.publicUrl;
-      }
+      // reset
+      setContent("");
+      setSelectedMood(null);
+      setConfidence(null);
+      setMoodReason(null);
+      setAiDetected(false);
+      setAnonymous(false);
+      setVisibility("public");
+      setImageFile(null);
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+      setImagePreview(null);
+      setComposerOpen(false);
+
+      loadPosts();
+    } finally {
+      setPosting(false);
     }
-
-    const postData: any = {
-      content: content.trim() ? content.trim() : null,
-      mood: selectedMood.label,
-      mood_emoji: selectedMood.emoji,
-      mood_color: selectedMood.color,
-      anonymous,
-      visibility,
-      owner_id: user.id,
-      image_url,
-      // ✅ analytics fields stored:
-      ai_detected: aiDetected,
-      ai_confidence: confidence,
-      ai_reason: moodReason,
-      repost_of: null,
-    };
-
-    const ins = await supabase.from("mood_posts").insert(postData);
-
-    if (ins.error) {
-      alert(ins.error.message || "Failed to share post");
-      logErr("Post insert error:", ins.error, ins);
-      return;
-    }
-
-    setContent("");
-    setSelectedMood(null);
-    setConfidence(null);
-    setMoodReason(null);
-    setAiDetected(false);
-    setAnonymous(false);
-    setVisibility("public");
-    setImageFile(null);
-
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
-    setImagePreview(null);
-
-    setComposerOpen(false);
-    loadPosts();
   };
 
   /* ---------------- DELETE ---------------- */
@@ -549,9 +519,7 @@ export default function MoodFeedPage() {
   useEffect(() => {
     const postsChannel = supabase
       .channel("realtime-posts")
-      .on("postgres_changes", { event: "*", schema: "public", table: "mood_posts" }, () => {
-        loadPosts();
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "mood_posts" }, () => loadPosts())
       .subscribe();
 
     const reactionsChannel = supabase
@@ -566,8 +534,7 @@ export default function MoodFeedPage() {
       .channel("realtime-comments")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "comments" }, (payload) => {
         const postId = (payload.new as any)?.post_id;
-        if (!postId) return;
-        if (openComments[postId]) loadComments(postId);
+        if (postId && openComments[postId]) loadComments(postId);
       })
       .subscribe();
 
@@ -591,49 +558,56 @@ export default function MoodFeedPage() {
   if (loading) return <div className="p-10 text-center">Loading…</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       <Navbar />
 
       <main className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         <div>
-          {/* COMPOSER */}
-          <div className="bg-white rounded-xl p-4 mb-6">
+          {/* Composer */}
+          <div className="bg-white rounded-2xl shadow-sm border p-4 mb-6">
             {!composerOpen ? (
-              <div className="cursor-pointer text-gray-500" onClick={() => setComposerOpen(true)}>
+              <button
+                onClick={() => setComposerOpen(true)}
+                className="w-full text-left text-gray-500 hover:text-gray-700"
+              >
                 Start a post…
-              </div>
+              </button>
             ) : (
               <>
                 <textarea
-                  className="w-full border rounded-lg p-3"
+                  className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   placeholder="How are you feeling? (optional)"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                 />
 
-                {detectingMood && <p className="text-sm text-gray-400 mt-1">🧠 Understanding mood…</p>}
-
-                {selectedMood && !detectingMood && (
-                  <p className="text-sm mt-1">
-                    {selectedMood.emoji} {selectedMood.label}
-                    {confidence !== null && <span className="text-xs ml-2">({confidence}%)</span>}
-                    {aiDetected && <span className="ml-2 text-xs text-green-600">AI</span>}
-                  </p>
+                {detectingMood && (
+                  <p className="text-xs text-gray-400 mt-2">🧠 Understanding mood…</p>
                 )}
 
-                {moodReason && <p className="text-xs text-gray-400 italic">🧠 {moodReason}</p>}
+                {selectedMood && !detectingMood && (
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-sm">
+                      {selectedMood.emoji} {selectedMood.label}
+                    </span>
+                    {confidence !== null && pill(`AI ${confidence}%`)}
+                    {aiDetected && pill("Detected")}
+                  </div>
+                )}
 
-                <div className="flex flex-wrap gap-2 mt-2">
+                {moodReason && <p className="text-xs text-gray-400 italic mt-1">🧠 {moodReason}</p>}
+
+                <div className="flex flex-wrap gap-2 mt-3">
                   {moodOptions.map((m) => (
                     <button
                       key={m.label}
                       onClick={() => {
                         setSelectedMood(m);
-                        setAiDetected(false); // manual override
+                        setAiDetected(false);
                         setConfidence(null);
                         setMoodReason(null);
                       }}
-                      className="px-3 py-1 border rounded-full text-sm"
+                      className="px-3 py-1.5 rounded-full text-sm border bg-white hover:bg-gray-50"
                       type="button"
                     >
                       {m.emoji} {m.label}
@@ -642,10 +616,10 @@ export default function MoodFeedPage() {
                 </div>
 
                 {/* Visibility */}
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-sm text-gray-600">Visibility:</span>
+                <div className="mt-4 flex items-center gap-2">
+                  <span className="text-sm text-gray-600">Visibility</span>
                   <select
-                    className="border rounded px-2 py-1 text-sm"
+                    className="border rounded-lg px-3 py-1.5 text-sm bg-white"
                     value={visibility}
                     onChange={(e) => setVisibility(e.target.value as Visibility)}
                   >
@@ -653,168 +627,231 @@ export default function MoodFeedPage() {
                     <option value="followers">Friend circle (followers)</option>
                     <option value="mutuals">Close friends (mutuals)</option>
                   </select>
-                </div>
 
-                {imagePreview && <img src={imagePreview} className="mt-3 rounded-lg" alt="preview" />}
-
-                <div className="flex justify-between mt-3 items-center">
-                  <label className="text-sm">
-                    <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />{" "}
+                  <label className="ml-auto text-sm text-gray-600 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={anonymous}
+                      onChange={(e) => setAnonymous(e.target.checked)}
+                    />
                     Anonymous
                   </label>
+                </div>
 
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => imageInputRef.current?.click()} className="text-sm border px-3 py-1 rounded">
-                      Image (optional)
-                    </button>
-
-                    <input
-                      ref={imageInputRef}
-                      type="file"
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) {
-                          setImageFile(f);
-                          if (imagePreview) URL.revokeObjectURL(imagePreview);
-                          setImagePreview(URL.createObjectURL(f));
-                        }
-                      }}
+                {/* Image */}
+                {imagePreview && (
+                  <div className="mt-4">
+                    <img
+                      src={imagePreview}
+                      className="rounded-2xl max-h-[420px] w-full object-cover border"
+                      alt="preview"
                     />
-
-                    <button
-                      disabled={!selectedMood}
-                      onClick={submitPost}
-                      className="bg-blue-600 disabled:opacity-40 text-white px-4 py-2 rounded-lg"
-                      type="button"
-                    >
-                      Share ✨
-                    </button>
                   </div>
+                )}
+
+                <div className="flex items-center justify-between mt-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="text-sm border px-3 py-2 rounded-xl hover:bg-gray-50"
+                  >
+                    Add Image
+                  </button>
+
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setImageFile(f);
+                        if (imagePreview) URL.revokeObjectURL(imagePreview);
+                        setImagePreview(URL.createObjectURL(f));
+                      }
+                    }}
+                  />
+
+                  <button
+                    disabled={!selectedMood || posting}
+                    onClick={submitPost}
+                    className="bg-blue-600 disabled:opacity-40 text-white px-4 py-2 rounded-xl"
+                    type="button"
+                  >
+                    {posting ? "Posting..." : "Share ✨"}
+                  </button>
                 </div>
               </>
             )}
           </div>
 
-          {/* POSTS */}
-          {posts.map((post) => (
-            <div key={post.id} className="bg-white rounded-xl p-4 mb-4">
-              <div className="text-sm text-gray-500">
-                {post.anonymous ? "Anonymous" : post.profiles?.full_name || post.profiles?.username || "User"} ·{" "}
-                {timeAgo(post.created_at)}
-                <span className="ml-2 text-xs text-gray-400">· {humanVisibility(post.visibility)}</span>
-              </div>
-
-              {/* repost label */}
-              {post.repost_of && (
-                <div className="text-xs text-purple-600 mt-1">🔁 Reposted</div>
-              )}
-
-              <p className="mt-2">
-                {post.mood_emoji}{" "}
-                {post.content ? post.content : <span className="text-gray-400">(no text)</span>}
-              </p>
-
-              {post.image_url && <img src={post.image_url} className="mt-3 rounded-lg" alt="post" />}
-
-              {/* AI analytics display */}
-              {post.ai_detected && post.ai_confidence !== null && (
-                <p className="text-xs text-gray-400 mt-1">
-                  🧠 AI confidence: {post.ai_confidence}%
-                  {post.ai_reason ? <span className="ml-2 italic">— {post.ai_reason}</span> : null}
-                </p>
-              )}
-
-              {/* Supportive reactions only */}
-              <div className="flex gap-3 mt-2 items-center flex-wrap">
-                {SUPPORTIVE_REACTIONS.map((r) => (
-                  <button
-                    key={r.key}
-                    onClick={() => toggleReaction(post.id, r.key)}
-                    type="button"
-                    className="text-sm"
-                    title={r.label}
-                  >
-                    {r.emoji} {reactionsMap[post.id]?.[r.key] || ""}
-                  </button>
-                ))}
-
-                {/* ✅ Save */}
-                <button
-                  onClick={() => toggleSave(post.id)}
-                  type="button"
-                  className="text-xs border px-2 py-1 rounded ml-2"
-                >
-                  {savedMap[post.id] ? "Saved ✅" : "Save"}
-                </button>
-
-                {/* ✅ Share */}
-                <button
-                  onClick={() => sharePost(post.id)}
-                  type="button"
-                  className="text-xs border px-2 py-1 rounded"
-                >
-                  Share
-                </button>
-
-                {/* ✅ Repost */}
-                <button
-                  onClick={() => repost(post)}
-                  type="button"
-                  className="text-xs border px-2 py-1 rounded"
-                >
-                  Repost
-                </button>
-              </div>
-
-              {post.owner_id === user?.id && (
-                <button
-                  onClick={() => deletePost(post.id)}
-                  className="text-xs text-red-600 mt-2"
-                  type="button"
-                >
-                  Delete
-                </button>
-              )}
-
-              {/* Comments */}
-              <button
-                className="text-sm text-blue-600 mt-2"
-                onClick={() => toggleCommentsPanel(post.id)}
-                type="button"
-              >
-                💬 {openComments[post.id] ? "Hide" : "Comments"}
-              </button>
-
-              {openComments[post.id] && (
-                <>
-                  {comments[post.id]?.map((c) => (
-                    <div key={c.id} className="text-sm mt-1">
-                      <b>{c.profiles?.full_name || c.profiles?.username || "User"}</b>: {c.content}
+          {/* Posts */}
+          <div className="space-y-4">
+            {posts.map((post) => (
+              <div key={post.id} className="bg-white rounded-2xl shadow-sm border p-4">
+                {/* header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-sm text-gray-600">
+                    <div className="font-medium text-gray-800">
+                      {post.anonymous
+                        ? "Anonymous"
+                        : post.profiles?.full_name || post.profiles?.username || "User"}
                     </div>
-                  ))}
+                    <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
+                      <span>{timeAgo(post.created_at)}</span>
+                      <span>•</span>
+                      <span>{humanVisibility(post.visibility)}</span>
+                      {post.repost_of ? (
+                        <>
+                          <span>•</span>
+                          <span className="text-purple-600">🔁 Reposted</span>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
 
-                  <div className="flex gap-2 mt-2">
-                    <input
-                      className="border rounded px-2 py-1 text-sm flex-1"
-                      value={newComment[post.id] || ""}
-                      onChange={(e) =>
-                        setNewComment((p) => ({
-                          ...p,
-                          [post.id]: e.target.value,
-                        }))
-                      }
-                      placeholder="No links. Keep it supportive…"
+                  {post.owner_id === user?.id && (
+                    <button
+                      onClick={() => deletePost(post.id)}
+                      className="text-xs text-red-600 hover:underline"
+                      type="button"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+
+                {/* content */}
+                <div className="mt-3 text-gray-900">
+                  <div className="text-base">
+                    <span className="mr-2">{post.mood_emoji}</span>
+                    {post.content ? (
+                      <span className="whitespace-pre-wrap">{post.content}</span>
+                    ) : (
+                      <span className="text-gray-400">(no text)</span>
+                    )}
+                  </div>
+
+                  {post.image_url && (
+                    <img
+                      src={post.image_url}
+                      className="mt-3 rounded-2xl max-h-[520px] w-full object-cover border"
+                      alt="post"
                     />
-                    <button onClick={() => addComment(post.id)} className="text-blue-600 text-sm" type="button">
-                      Send
+                  )}
+
+                  {/* AI analytics */}
+                  {post.ai_detected && post.ai_confidence !== null && (
+                    <div className="mt-2 text-xs text-gray-500 flex flex-wrap items-center gap-2">
+                      {pill(`🧠 AI ${post.ai_confidence}%`)}
+                      {post.ai_reason ? <span className="italic">— {post.ai_reason}</span> : null}
+                    </div>
+                  )}
+                </div>
+
+                {/* actions row */}
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {/* reactions */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {SUPPORTIVE_REACTIONS.map((r) => (
+                      <button
+                        key={r.key}
+                        onClick={() => toggleReaction(post.id, r.key)}
+                        type="button"
+                        className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2"
+                        title={r.label}
+                      >
+                        <span>{r.emoji}</span>
+                        <span className="text-gray-700">
+                          {reactionsMap[post.id]?.[r.key] ?? 0}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-2">
+                    {/* save */}
+                    <button
+                      onClick={() => toggleSave(post.id)}
+                      type="button"
+                      className={`text-sm rounded-full px-3 py-1.5 border hover:bg-gray-50 ${
+                        savedMap[post.id] ? "bg-yellow-50 border-yellow-200" : ""
+                      }`}
+                    >
+                      {savedMap[post.id] ? "Saved ✅" : "Save"}
+                    </button>
+
+                    {/* share */}
+                    <button
+                      onClick={() => sharePost(post.id)}
+                      type="button"
+                      className="text-sm rounded-full px-3 py-1.5 border hover:bg-gray-50"
+                    >
+                      Share
+                    </button>
+
+                    {/* repost */}
+                    <button
+                      onClick={() => repost(post)}
+                      type="button"
+                      className="text-sm rounded-full px-3 py-1.5 border hover:bg-gray-50"
+                    >
+                      Repost
                     </button>
                   </div>
-                </>
-              )}
-            </div>
-          ))}
+                </div>
+
+                {/* comments */}
+                <div className="mt-4">
+                  <button
+                    className="text-sm text-blue-600 hover:underline"
+                    onClick={() => toggleCommentsPanel(post.id)}
+                    type="button"
+                  >
+                    💬 {openComments[post.id] ? "Hide comments" : "Comments"}
+                  </button>
+
+                  {openComments[post.id] && (
+                    <div className="mt-3">
+                      <div className="space-y-2">
+                        {(comments[post.id] || []).map((c) => (
+                          <div key={c.id} className="text-sm">
+                            <span className="font-medium text-gray-800">
+                              {c.profiles?.full_name || c.profiles?.username || "User"}
+                            </span>
+                            <span className="text-gray-500"> · </span>
+                            <span className="text-gray-700">{c.content}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex gap-2 mt-3">
+                        <input
+                          className="border rounded-xl px-3 py-2 text-sm flex-1 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          value={newComment[post.id] || ""}
+                          onChange={(e) =>
+                            setNewComment((p) => ({
+                              ...p,
+                              [post.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="No links. Keep it supportive…"
+                        />
+                        <button
+                          onClick={() => addComment(post.id)}
+                          className="text-sm bg-blue-600 text-white px-4 rounded-xl"
+                          type="button"
+                        >
+                          Send
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <RightSidebar userEmail={user?.email} />
