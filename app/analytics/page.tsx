@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
@@ -9,7 +9,7 @@ import { BarChart3, Zap, Flame, CalendarDays, History } from "lucide-react";
 type Timeframe = "week" | "month" | "quarter";
 
 type TimelineRow = {
-  day: string; // date
+  day: string;
   mood_posts: number;
   positive_posts: number;
   positive_percent: number;
@@ -71,12 +71,21 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function safeErrMsg(e: any) {
+  return (
+    (typeof e?.message === "string" && e.message) ||
+    (typeof e === "string" && e) ||
+    "Unknown error"
+  );
+}
+
 export default function AnalyticsPage() {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
 
   const [timeframe, setTimeframe] = useState<Timeframe>("month");
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
   const [distribution, setDistribution] = useState<MoodDistributionRow[]>([]);
@@ -92,19 +101,27 @@ export default function AnalyticsPage() {
     topMood: "N/A",
   });
 
+  // ✅ prevents overlapping loads (realtime + refresh)
+  const inFlightRef = useRef(false);
+
   const loadAll = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+
     const days_back = daysFromTimeframe(timeframe);
-
-    // auth guard
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) {
-      router.replace("/login");
-      return;
-    }
-
+    setErrorMsg(null);
     setLoading(true);
 
     try {
+      // auth guard
+      const { data: authRes, error: authErr } = await supabase.auth.getUser();
+      if (authErr) throw authErr;
+
+      if (!authRes.user) {
+        router.replace("/login");
+        return;
+      }
+
       // 1) correlation timeline
       const corr = await supabase.rpc("get_my_mood_goal_correlation", { days_back });
       if (corr.error) throw corr.error;
@@ -114,42 +131,45 @@ export default function AnalyticsPage() {
       // 2) mood distribution
       const dist = await supabase.rpc("get_my_mood_distribution", { days_back });
       if (dist.error) throw dist.error;
-      setDistribution((dist.data || []) as MoodDistributionRow[]);
+      const distRows = (dist.data || []) as MoodDistributionRow[];
+      setDistribution(distRows);
 
       // 3) insights
       const ins = await supabase.rpc("get_my_emotional_insights", { days_back });
       if (ins.error) throw ins.error;
-      setInsights(ins.data as Insights);
+      const insRow = ins.data as Insights;
+      setInsights(insRow);
 
-      // 4) memory lane (longer window feels nicer)
+      // 4) memory lane (optional)
       const mem = await supabase.rpc("get_my_memory_lane", { days_back: Math.max(days_back, 90) });
       if (mem.error) {
-        // if you haven't created journal_entries yet, this can fail — keep UI alive
+        // keep UI alive if missing journal table/function
         setMemoryLane([]);
       } else {
         setMemoryLane((mem.data || []) as MemoryLaneRow[]);
       }
 
-      // derive top-level stats from corr + dist
+      // derive stats
       const totalMoodPosts = corrRows.reduce((s, r) => s + (r.mood_posts || 0), 0);
       const goalsCompleted = corrRows.reduce((s, r) => s + (r.goals_completed || 0), 0);
       const positivePosts = corrRows.reduce((s, r) => s + (r.positive_posts || 0), 0);
+
       const avgEnergy =
         corrRows.length > 0
           ? Math.round((corrRows.reduce((s, r) => s + (r.avg_energy || 0), 0) / corrRows.length) * 10) / 10
           : 0;
 
-      const topMood = distribution?.[0]?.mood || (ins.data?.top_mood ?? "N/A");
-      const positivePercent =
-        totalMoodPosts === 0 ? 0 : Math.round((positivePosts / totalMoodPosts) * 100);
+      const positivePercent = totalMoodPosts === 0 ? 0 : Math.round((positivePosts / totalMoodPosts) * 100);
 
-      // mood streak: consecutive days with >=1 post ending today
+      // streak = consecutive days with >=1 post ending today
       let streak = 0;
       for (let i = corrRows.length - 1; i >= 0; i--) {
-        const dayPosts = corrRows[i]?.mood_posts || 0;
-        if (dayPosts > 0) streak++;
+        if ((corrRows[i]?.mood_posts || 0) > 0) streak++;
         else break;
       }
+
+      // ✅ top mood from dist rows, fallback to insights
+      const topMood = distRows?.[0]?.mood || insRow?.top_mood || "N/A";
 
       setStats({
         moodStreak: streak,
@@ -160,23 +180,23 @@ export default function AnalyticsPage() {
         topMood,
       });
     } catch (e: any) {
-      alert(e?.message || "Failed to load analytics");
+      setErrorMsg(safeErrMsg(e));
     } finally {
       setLoading(false);
+      inFlightRef.current = false;
     }
-  }, [router, supabase, timeframe, distribution]);
+  }, [router, supabase, timeframe]); // ✅ removed distribution from deps
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
 
-  // realtime: refresh when mood_posts / goal_completions / journal_entries change
+  // realtime: refresh on changes (but won’t overlap due to inFlightRef)
   useEffect(() => {
     const ch = supabase
       .channel("analytics-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "mood_posts" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "goal_completions" }, () => loadAll())
-      // if table doesn't exist yet, it just won't fire
       .on("postgres_changes", { event: "*", schema: "public", table: "journal_entries" }, () => loadAll())
       .subscribe();
 
@@ -185,7 +205,6 @@ export default function AnalyticsPage() {
     };
   }, [supabase, loadAll]);
 
-  // UI helpers
   const maxGoals = Math.max(1, ...timeline.map((r) => r.goals_completed || 0));
   const maxEnergy = 5;
 
@@ -222,10 +241,26 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {loading ? (
-          <div className="bg-white rounded-2xl border shadow-sm p-8 text-gray-600">
-            Loading analytics…
+        {/* Error */}
+        {errorMsg && (
+          <div className="bg-white border rounded-2xl p-5 shadow-sm mb-6">
+            <div className="font-semibold text-red-600">Analytics failed to load</div>
+            <div className="text-sm text-gray-600 mt-1">{errorMsg}</div>
+            <div className="text-xs text-gray-500 mt-2">
+              Tip: Open DevTools → Network → look for <b>/rest/v1/rpc/...</b> calls and tell me which one fails (404/401/500).
+            </div>
+            <button
+              onClick={loadAll}
+              className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold"
+              type="button"
+            >
+              Retry
+            </button>
           </div>
+        )}
+
+        {loading ? (
+          <div className="bg-white rounded-2xl border shadow-sm p-8 text-gray-600">Loading analytics…</div>
         ) : (
           <>
             {/* Stats */}
@@ -238,34 +273,22 @@ export default function AnalyticsPage() {
               <StatCard icon={<History className="w-4 h-4" />} label="Top Mood" value={stats.topMood} />
             </div>
 
-            {/* Smart insights */}
+            {/* Insights */}
             {insights && (
               <div className="bg-white rounded-2xl border shadow-sm p-6 mb-8">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">🧠 Emotional Insights</h2>
                 <div className="grid md:grid-cols-2 gap-3 text-sm text-gray-700">
-                  <InsightLine
-                    label="Top mood"
-                    value={insights.top_mood}
-                  />
-                  <InsightLine
-                    label="Best day of week"
-                    value={insights.best_day_of_week}
-                  />
-                  <InsightLine
-                    label="Weekend positivity"
-                    value={`${insights.weekend_positive_percent}%`}
-                  />
-                  <InsightLine
-                    label="Weekday positivity"
-                    value={`${insights.weekday_positive_percent}%`}
-                  />
+                  <InsightLine label="Top mood" value={insights.top_mood} />
+                  <InsightLine label="Best day of week" value={insights.best_day_of_week} />
+                  <InsightLine label="Weekend positivity" value={`${insights.weekend_positive_percent}%`} />
+                  <InsightLine label="Weekday positivity" value={`${insights.weekday_positive_percent}%`} />
                 </div>
               </div>
             )}
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-              {/* Mood+Energy timeline */}
+              {/* Timeline */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border">
                 <h2 className="font-bold mb-4">Mood + Energy Timeline</h2>
 
@@ -294,12 +317,10 @@ export default function AnalyticsPage() {
                   );
                 })}
 
-                <div className="mt-4 text-xs text-gray-500">
-                  Blue = energy · Green = goals completed
-                </div>
+                <div className="mt-4 text-xs text-gray-500">Blue = energy · Green = goals completed</div>
               </div>
 
-              {/* Mood distribution */}
+              {/* Distribution */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border">
                 <h2 className="font-bold mb-4 flex items-center gap-2">
                   <Zap className="w-5 h-5" /> Mood Distribution
@@ -311,7 +332,6 @@ export default function AnalyticsPage() {
                   distribution.map((row) => {
                     const pct = clamp(row.percent || 0, 0, 100);
                     const color = moodColors[row.mood] || "#9ca3af";
-
                     return (
                       <div key={row.mood} className="flex items-center gap-3 mb-3">
                         <span className="w-24 text-sm text-gray-700">{row.mood}</span>
@@ -328,13 +348,13 @@ export default function AnalyticsPage() {
               </div>
             </div>
 
-            {/* Memory lane */}
+            {/* Memory Lane */}
             <div className="bg-white rounded-2xl border shadow-sm p-6">
               <h2 className="text-lg font-bold text-gray-900 mb-4">⏳ Memory Lane</h2>
 
               {memoryLane.length === 0 ? (
                 <div className="text-sm text-gray-500">
-                  No memory lane items yet. (If you haven’t created <b>journal_entries</b>, you’ll only see mood posts.)
+                  No memory lane items yet. (If you haven’t created <b>journal_entries</b>, you may only see mood posts.)
                 </div>
               ) : (
                 <div className="space-y-3">
