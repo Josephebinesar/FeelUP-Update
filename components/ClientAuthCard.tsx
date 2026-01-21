@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AuthCard from "./AuthCard";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -10,7 +10,7 @@ export default function ClientAuthCard({
 }: {
   mode?: "signup" | "login";
 }) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const router = useRouter();
 
   const [isClient, setIsClient] = useState(false);
@@ -25,47 +25,51 @@ export default function ClientAuthCard({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
+  useEffect(() => setIsClient(true), []);
 
   // 🧪 Username validation
-  const isValidUsername = (value: string) =>
-    /^[a-zA-Z0-9_]{4,20}$/.test(value);
+  const isValidUsername = (value: string) => /^[a-zA-Z0-9_]{4,20}$/.test(value);
+
+  // normalize
+  const normalizedUsername = username.trim().toLowerCase();
 
   // 🔐 Signup
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (!full_name.trim()) return setError("Full name is required");
-    if (!username.trim()) return setError("Username is required");
-    if (!isValidUsername(username))
+    const cleanName = full_name.trim();
+    const cleanEmail = email.trim();
+
+    if (!cleanName) return setError("Full name is required");
+    if (!normalizedUsername) return setError("Username is required");
+    if (!isValidUsername(normalizedUsername)) {
       return setError(
         "Username must be 4–20 characters (letters, numbers, underscore only)"
       );
-    if (!acceptTerms)
-      return setError("You must accept the terms and conditions");
+    }
+    if (!acceptTerms) return setError("You must accept the terms and conditions");
 
     setLoading(true);
 
     try {
       const { error } = await supabase.auth.signUp({
-        email,
+        email: cleanEmail,
         password,
         options: {
           data: {
-            full_name,
-            username,
+            full_name: cleanName,
+            username: normalizedUsername,
           },
         },
       });
 
       if (error) throw error;
 
+      // ✅ You can redirect to verify-email screen if you want later
       router.push("/login");
     } catch (err: any) {
-      setError(err.message || "Signup failed");
+      setError(err?.message || "Signup failed");
     } finally {
       setLoading(false);
     }
@@ -79,7 +83,7 @@ export default function ClientAuthCard({
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
 
@@ -98,7 +102,14 @@ export default function ClientAuthCard({
 
   if (!isClient) {
     return (
-      <div className="p-6 animate-pulse bg-gray-200 rounded-lg h-64" />
+      <div className="rounded-3xl border bg-white p-6 shadow-sm">
+        <div className="animate-pulse space-y-4">
+          <div className="h-10 bg-gray-100 rounded-xl" />
+          <div className="h-10 bg-gray-100 rounded-xl" />
+          <div className="h-10 bg-gray-100 rounded-xl" />
+          <div className="h-10 bg-gray-100 rounded-xl" />
+        </div>
+      </div>
     );
   }
 
@@ -106,15 +117,30 @@ export default function ClientAuthCard({
     <AuthCard
       mode={mode}
       email={email}
-      setEmail={setEmail}
+      setEmail={(v) => {
+        setError("");
+        setEmail(v);
+      }}
       password={password}
-      setPassword={setPassword}
+      setPassword={(v) => {
+        setError("");
+        setPassword(v);
+      }}
       full_name={full_name}
-      setFullName={setFullName}
+      setFullName={(v) => {
+        setError("");
+        setFullName(v);
+      }}
       username={username}
-      setUsername={setUsername}
+      setUsername={(v) => {
+        setError("");
+        setUsername(v);
+      }}
       acceptTerms={acceptTerms}
-      setAcceptTerms={setAcceptTerms}
+      setAcceptTerms={(v) => {
+        setError("");
+        setAcceptTerms(v);
+      }}
       onRegister={handleRegister}
       onLogin={handleLogin}
       error={error}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import {
   Heart,
@@ -25,26 +25,48 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
 
-  // ✅ Memoized singleton instance
+  // ✅ singleton supabase
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
 
   const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    let mounted = true;
+
+    async function init() {
+      const { data, error } = await supabase.auth.getUser();
+      if (!mounted) return;
+
+      if (error) console.error("Sidebar getUser error:", error);
       setUser(data.user ?? null);
+      setAuthLoading(false);
+    }
+
+    init();
+
+    // ✅ IMPORTANT: realtime auth updates (login/logout)
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+
+      // Optional: refresh server components if you have any
+      router.refresh();
     });
-  }, [supabase]);
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase, router]);
 
   const navigation = [
     { name: "Home", href: "/mood-feed", icon: Heart },
     { name: "Goals", href: "/goals", icon: Target },
     { name: "Journal", href: "/journal", icon: BookOpen },
     { name: "Events", href: "/events", icon: Calendar },
-
-    // 🆕 Community (added after Events)
     { name: "Community", href: "/community", icon: Users },
-
     { name: "Explore", href: "/explore", icon: Search },
     { name: "Messages", href: "/messages", icon: MessageCircle },
     { name: "Analytics", href: "/analytics", icon: BarChart3 },
@@ -60,7 +82,9 @@ export default function Sidebar() {
 
   const logout = async () => {
     await supabase.auth.signOut();
+    setUser(null);
     router.replace("/login");
+    router.refresh();
   };
 
   return (
@@ -110,7 +134,9 @@ export default function Sidebar() {
 
       {/* Auth */}
       <div className="p-4 border-t">
-        {!user ? (
+        {authLoading ? (
+          <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />
+        ) : !user ? (
           <Link
             href="/login"
             className="block text-center bg-blue-600 text-white py-2 rounded-lg text-sm"
