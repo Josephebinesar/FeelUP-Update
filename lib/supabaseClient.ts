@@ -1,11 +1,12 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 
 /* ====================================================
    SUPABASE CLIENT – FINAL, STABLE, SINGLETON
    ✔ App Router safe
-   ✔ AbortError safe
-   ✔ Client & Server separated
-   ❌ DO NOT MODIFY AFTER THIS
+   ✔ Cookie-based auth for middleware (browser)
+   ✔ Service-role server client for APIs
 ==================================================== */
 
 /* ---------- ENV ---------- */
@@ -19,30 +20,25 @@ if (!PUBLIC_URL || !PUBLIC_ANON) {
 }
 
 /* ---------- BROWSER CLIENT (SINGLETON) ---------- */
-
-let browserClient: SupabaseClient | null = null;
-
 /**
  * ✅ USE THIS IN ALL CLIENT COMPONENTS
+ * ✅ Uses cookies (required for middleware route protection)
  */
+let browserClient: SupabaseClient | null = null;
+
 export function createBrowserSupabaseClient(): SupabaseClient {
   if (browserClient) return browserClient;
 
-  browserClient = createClient(PUBLIC_URL, PUBLIC_ANON, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: false, // REQUIRED for Next.js App Router
-    },
-  });
+  // ✅ This stores session in cookies (middleware can read it)
+  browserClient = createBrowserClient(PUBLIC_URL, PUBLIC_ANON);
 
   return browserClient;
 }
 
-/* ---------- SERVER CLIENT (API / SERVER ONLY) ---------- */
-
+/* ---------- SERVER CLIENT (SERVICE ROLE: API / SERVER ONLY) ---------- */
 /**
  * ❌ NEVER USE THIS IN CLIENT COMPONENTS
+ * ✅ Use only in API routes / server actions (dangerous privileges)
  */
 export function createServerSupabaseClient(): SupabaseClient {
   if (!SERVICE_KEY) {
@@ -53,6 +49,7 @@ export function createServerSupabaseClient(): SupabaseClient {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+      detectSessionInUrl: false,
     },
   });
 }

@@ -27,6 +27,11 @@ type Props = {
   loading: boolean;
 };
 
+function isStaffEmail(email?: string) {
+  const e = (email || "").toLowerCase().trim();
+  return e.endsWith("@admin.feelup") || e.endsWith("@psychologist.feelup");
+}
+
 export default function AuthCard({
   mode = "signup",
 
@@ -48,6 +53,7 @@ export default function AuthCard({
   loading,
 }: Props) {
   const isSignup = mode === "signup";
+  const staffTyped = isStaffEmail(email);
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 space-y-5">
@@ -55,10 +61,7 @@ export default function AuthCard({
         {isSignup ? "Create your FeelUp account" : "Welcome back to FeelUp"}
       </h2>
 
-      <form
-        onSubmit={isSignup ? onRegister : onLogin}
-        className="space-y-4"
-      >
+      <form onSubmit={isSignup ? onRegister : onLogin} className="space-y-4">
         {/* FULL NAME (Signup only) */}
         {isSignup && (
           <input
@@ -125,9 +128,7 @@ export default function AuthCard({
         )}
 
         {/* ERROR */}
-        {error && (
-          <p className="text-sm text-red-600 text-center">{error}</p>
-        )}
+        {error && <p className="text-sm text-red-600 text-center">{error}</p>}
 
         {/* SUBMIT */}
         <button
@@ -135,12 +136,15 @@ export default function AuthCard({
           disabled={loading}
           className="w-full py-2 rounded-lg bg-black text-white hover:bg-gray-900 transition disabled:opacity-50"
         >
-          {loading
-            ? "Please wait..."
-            : isSignup
-            ? "Create Account"
-            : "Login"}
+          {loading ? "Please wait..." : isSignup ? "Create Account" : "Login"}
         </button>
+
+        {/* Helpful hint (login only) */}
+        {!isSignup ? (
+          <p className="text-xs text-gray-500 text-center">
+            Admin: <b>@admin.feelup</b> · Psychologist: <b>@psychologist.feelup</b>
+          </p>
+        ) : null}
       </form>
 
       {/* SWITCH MODE */}
@@ -156,6 +160,11 @@ export default function AuthCard({
               Login
             </button>
           </>
+        ) : staffTyped ? (
+          // ✅ Staff should not see create account option
+          <span className="text-gray-500">
+            Account creation is disabled for this email.
+          </span>
         ) : (
           <>
             Don’t have an account?{" "}
