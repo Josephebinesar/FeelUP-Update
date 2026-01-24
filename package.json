@@ -10,6 +10,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.90.0",
     "cloudinary": "^2.8.0",
     "lucide-react": "^0.562.0",

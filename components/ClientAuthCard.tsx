@@ -5,6 +5,18 @@ import AuthCard from "./AuthCard";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
+function routeByEmail(email?: string | null) {
+  const e = (email || "").toLowerCase().trim();
+  if (e.endsWith("@admin.feelup")) return "/admin";
+  if (e.endsWith("@psychologist.feelup")) return "/psychologist";
+  return "/mood-feed";
+}
+
+function isStaffEmail(email?: string | null) {
+  const e = (email || "").toLowerCase().trim();
+  return e.endsWith("@admin.feelup") || e.endsWith("@psychologist.feelup");
+}
+
 export default function ClientAuthCard({
   mode = "signup",
 }: {
@@ -33,13 +45,23 @@ export default function ClientAuthCard({
   // normalize
   const normalizedUsername = username.trim().toLowerCase();
 
-  // 🔐 Signup
+  // ✅ IMPORTANT: staff cannot sign up
+  const effectiveMode: "signup" | "login" =
+    mode === "signup" && isStaffEmail(email) ? "login" : mode;
+
+  // 🔐 Signup (ONLY for normal users)
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
     const cleanName = full_name.trim();
     const cleanEmail = email.trim();
+
+    // block staff signup
+    if (isStaffEmail(cleanEmail)) {
+      setError("This email is not allowed to create an account here.");
+      return;
+    }
 
     if (!cleanName) return setError("Full name is required");
     if (!normalizedUsername) return setError("Username is required");
@@ -66,8 +88,9 @@ export default function ClientAuthCard({
 
       if (error) throw error;
 
-      // ✅ You can redirect to verify-email screen if you want later
+      // ✅ send to login after signup
       router.push("/login");
+      router.refresh();
     } catch (err: any) {
       setError(err?.message || "Signup failed");
     } finally {
@@ -75,14 +98,14 @@ export default function ClientAuthCard({
     }
   };
 
-  // 🔐 Login
+  // 🔐 Login (redirect based on email domain)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
@@ -92,7 +115,9 @@ export default function ClientAuthCard({
         return;
       }
 
-      router.push("/mood-feed");
+      const to = routeByEmail(data.user?.email);
+      router.replace(to);
+      router.refresh();
     } catch {
       setError("Something went wrong");
     } finally {
@@ -115,7 +140,7 @@ export default function ClientAuthCard({
 
   return (
     <AuthCard
-      mode={mode}
+      mode={effectiveMode}
       email={email}
       setEmail={(v) => {
         setError("");

@@ -1,7 +1,8 @@
 "use client";
 
-import ClientAuthCard from "@/components/ClientAuthCard";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import {
   ShieldCheck,
   Sparkles,
@@ -11,8 +12,56 @@ import {
   ArrowLeft,
 } from "lucide-react";
 
+function routeByEmail(email?: string | null) {
+  const e = (email || "").toLowerCase().trim();
+  if (e.endsWith("@admin.feelup")) return "/admin";
+  if (e.endsWith("@psychologist.feelup")) return "/psychologist";
+  return "/mood-feed";
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+
+    const em = email.trim();
+    const pw = password;
+
+    if (!em || !pw) {
+      setErr("Email and password are required.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: em,
+        password: pw,
+      });
+
+      if (error) {
+        setErr(error.message || "Login failed.");
+        return;
+      }
+
+      const to = routeByEmail(data.user?.email);
+      router.replace(to);
+      router.refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
@@ -22,6 +71,7 @@ export default function LoginPage() {
           <button
             onClick={() => router.push("/")}
             className="inline-flex items-center gap-2 text-sm font-semibold text-purple-700 hover:text-purple-900"
+            type="button"
           >
             <ArrowLeft className="w-4 h-4" />
             Back
@@ -31,9 +81,7 @@ export default function LoginPage() {
             <div className="w-9 h-9 rounded-2xl bg-white shadow flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-purple-700" />
             </div>
-            <span className="text-xl font-extrabold text-purple-900">
-              FeelUp
-            </span>
+            <span className="text-xl font-extrabold text-purple-900">FeelUp</span>
           </div>
 
           <div className="w-[60px]" />
@@ -86,11 +134,17 @@ export default function LoginPage() {
                 <Chip icon={<Flame className="w-3.5 h-3.5" />} label="Challenges" />
               </div>
 
+              {/* Role hint (hidden style, but useful for you) */}
+              <div className="mt-6 text-xs text-gray-500">
+                Admin: <b>@admin.feelup</b> · Psychologist: <b>@psychologist.feelup</b>
+              </div>
+
               <div className="mt-8 text-sm text-gray-600">
                 Don’t have an account?{" "}
                 <button
                   onClick={() => router.push("/")}
                   className="font-semibold text-purple-700 hover:underline"
+                  type="button"
                 >
                   Create Account →
                 </button>
@@ -104,13 +158,52 @@ export default function LoginPage() {
               <h2 className="text-3xl font-extrabold text-gray-900">
                 Welcome back to FeelUp
               </h2>
-              <p className="text-gray-600 mt-2">
-                Continue where you left off.
-              </p>
+              <p className="text-gray-600 mt-2">Continue where you left off.</p>
             </div>
 
-            {/* Your existing login component */}
-            <ClientAuthCard mode="login" />
+            {/* ✅ Login form (replaces ClientAuthCard) */}
+            {err ? (
+              <div className="mb-4 text-sm rounded-2xl border border-red-200 bg-red-50 text-red-700 p-3">
+                {err}
+              </div>
+            ) : null}
+
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-gray-700">
+                  Email
+                </label>
+                <input
+                  className="mt-1 w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-purple-200"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@email.com"
+                  autoComplete="email"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-semibold text-gray-700">
+                  Password
+                </label>
+                <input
+                  className="mt-1 w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-purple-200"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  type="password"
+                  autoComplete="current-password"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-2xl bg-purple-700 text-white py-3 text-sm font-semibold hover:bg-purple-800 disabled:opacity-60"
+              >
+                {loading ? "Signing in..." : "Sign In"}
+              </button>
+            </form>
 
             {/* Footer links */}
             <div className="mt-8 pt-6 border-t flex flex-col sm:flex-row gap-3 items-center justify-between text-sm text-gray-500">
@@ -123,10 +216,7 @@ export default function LoginPage() {
                 </a>
               </div>
 
-              <a
-                href="mailto:support@feelup.com"
-                className="hover:text-purple-700"
-              >
+              <a href="mailto:support@feelup.com" className="hover:text-purple-700">
                 Support
               </a>
             </div>

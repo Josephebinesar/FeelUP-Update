@@ -10,7 +10,6 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
-import Navbar from "@/components/Navbar";
 import RightSidebar from "@/components/RightSidebar";
 import Footer from "@/components/Footer";
 
@@ -76,18 +75,11 @@ function safeErrMsg(err: any) {
 }
 
 function isMissingColumnError(msg: string) {
-  // Postgres: "column ... does not exist"
   return msg.toLowerCase().includes("does not exist") && msg.toLowerCase().includes("column");
 }
 
 function startOfLocalDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function daysBetween(a: Date, b: Date) {
-  const A = startOfLocalDay(a).getTime();
-  const B = startOfLocalDay(b).getTime();
-  return Math.round((A - B) / (1000 * 60 * 60 * 24));
 }
 
 function fmtTimeOnly(t?: string | null) {
@@ -173,6 +165,10 @@ export default function MoodFeedPage() {
     const code =
       (typeof err?.code === "string" && err.code) ||
       (typeof err?.status === "number" ? String(err.status) : "");
+
+    // ✅ ignore "Auth session missing" noise
+    if (msg.toLowerCase().includes("auth session missing")) return;
+
     console.error(`${label} ${code ? `[${code}]` : ""} ${msg}`);
     if (extra !== undefined) console.error(`${label} extra:`, extra);
   };
@@ -190,31 +186,33 @@ export default function MoodFeedPage() {
     if (h >= 11 && h <= 16) return "☀️ Midday check-in — how’s your day going so far?";
     if (h >= 17 && h <= 21) return "🌇 Evening — how did your day go?";
     return "🌙 Late night — how was your day? Be kind to yourself.";
-  }, [composerOpen]); // refresh when opened
+  }, [composerOpen]);
 
-  /* ---------------- AUTH ---------------- */
+  /* ---------------- ✅ AUTH (FIXED) ---------------- */
 
-  useEffect(() => {
-    let mounted = true;
+useEffect(() => {
+  let mounted = true;
 
-    supabase.auth.getUser().then(({ data, error }) => {
-      if (!mounted) return;
+  (async () => {
+    // ✅ SAFE: no AuthSessionMissingError
+    const { data } = await supabase.auth.getSession();
+    if (!mounted) return;
 
-      if (error) logErr("AUTH getUser error:", error);
+    const u = data.session?.user ?? null;
+    if (!u) {
+      router.replace("/login");
+      return;
+    }
 
-      if (!data?.user) {
-        router.replace("/login");
-        return;
-      }
+    setUser(u);
+    setLoading(false);
+  })();
 
-      setUser(data.user);
-      setLoading(false);
-    });
+  return () => {
+    mounted = false;
+  };
+}, [router, supabase]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [router, supabase]);
 
   /* ---------------- AI MOOD DETECTION ---------------- */
 
@@ -304,10 +302,7 @@ export default function MoodFeedPage() {
     }
 
     if (sel.data?.id) {
-      const del = await supabase
-        .from("post_reactions")
-        .delete()
-        .eq("id", sel.data.id);
+      const del = await supabase.from("post_reactions").delete().eq("id", sel.data.id);
       if (del.error) logErr("toggleReaction delete error:", del.error, del);
     } else {
       const ins = await supabase.from("post_reactions").insert({
@@ -400,13 +395,11 @@ export default function MoodFeedPage() {
       ai_detected: false,
       ai_confidence: null,
       ai_reason: null,
-      // best-effort carry energy if exists
       energy_level: post.energy_level ?? null,
     });
 
     if (ins.error) {
       const msg = safeErrMsg(ins.error);
-      // If energy_level column doesn't exist, retry without it
       if (isMissingColumnError(msg) && msg.toLowerCase().includes("energy_level")) {
         const ins2 = await supabase.from("mood_posts").insert({
           content: post.content,
@@ -503,9 +496,7 @@ export default function MoodFeedPage() {
       }
 
       const list = res.data || [];
-      const userIds = Array.from(
-        new Set(list.map((c: any) => c.user_id).filter(Boolean))
-      );
+      const userIds = Array.from(new Set(list.map((c: any) => c.user_id).filter(Boolean)));
 
       let profilesById: Record<string, any> = {};
       if (userIds.length > 0) {
@@ -513,10 +504,9 @@ export default function MoodFeedPage() {
           .from("profiles")
           .select("id, full_name, username")
           .in("id", userIds);
+
         if (profRes.error) logErr("LOAD COMMENT PROFILES ERROR:", profRes.error, profRes);
-        else profilesById = Object.fromEntries(
-          (profRes.data || []).map((p: any) => [p.id, p])
-        );
+        else profilesById = Object.fromEntries((profRes.data || []).map((p: any) => [p.id, p]));
       }
 
       const merged = list.map((c: any) => ({
@@ -559,7 +549,6 @@ export default function MoodFeedPage() {
   const loadStreak = useCallback(async () => {
     if (!user?.id) return;
 
-    // pull last ~90 posts of the user, compute daily streak
     const res = await supabase
       .from("mood_posts")
       .select("created_at")
@@ -578,14 +567,11 @@ export default function MoodFeedPage() {
       return;
     }
 
-    // set of unique day keys
-    const dayKeys = new Set(
-      dates.map((d) => startOfLocalDay(d).toISOString())
-    );
+    const dayKeys = new Set(dates.map((d) => startOfLocalDay(d).toISOString()));
 
     let s = 0;
     let cursor = startOfLocalDay(new Date());
-    // if user hasn't posted today, streak can start from yesterday
+
     if (!dayKeys.has(cursor.toISOString())) {
       cursor = new Date(cursor.getTime() - 86400000);
     }
@@ -617,7 +603,7 @@ export default function MoodFeedPage() {
     if (mine.length === 0) return "No posts in the last 7 days. A small check-in is still a win 🌱";
 
     const counts: Record<string, number> = {};
-    const hourCounts: Record<string, number> = {}; // morning/afternoon/evening/night
+    const hourCounts: Record<string, number> = {};
 
     for (const p of mine) {
       const mood = p.mood || "Unknown";
@@ -625,13 +611,7 @@ export default function MoodFeedPage() {
 
       const h = new Date(p.created_at).getHours();
       const bucket =
-        h >= 5 && h <= 10
-          ? "morning"
-          : h >= 11 && h <= 16
-          ? "midday"
-          : h >= 17 && h <= 21
-          ? "evening"
-          : "night";
+        h >= 5 && h <= 10 ? "morning" : h >= 11 && h <= 16 ? "midday" : h >= 17 && h <= 21 ? "evening" : "night";
       hourCounts[bucket] = (hourCounts[bucket] || 0) + 1;
     }
 
@@ -639,13 +619,7 @@ export default function MoodFeedPage() {
     const topTime = Object.entries(hourCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
 
     const timeLabel =
-      topTime === "morning"
-        ? "mornings"
-        : topTime === "midday"
-        ? "midday"
-        : topTime === "evening"
-        ? "evenings"
-        : "late nights";
+      topTime === "morning" ? "mornings" : topTime === "midday" ? "midday" : topTime === "evening" ? "evenings" : "late nights";
 
     return `In the last 7 days, your most common mood was ${topMood}. You checked in most during ${timeLabel}.`;
   }, [posts, user?.id]);
@@ -653,7 +627,6 @@ export default function MoodFeedPage() {
   const loadWeeklyReflection = useCallback(async () => {
     setWeeklySummary(buildLocalWeeklySummary());
 
-    // Optional: if you have an AI endpoint, we try it (won't crash if missing)
     setWeeklyLoading(true);
     try {
       const res = await fetch("/api/weekly-reflection", {
@@ -668,7 +641,6 @@ export default function MoodFeedPage() {
       }
 
       const data = await res.json();
-      // expected: { text: "..." }
       if (typeof data?.text === "string" && data.text.trim()) setWeeklyAI(data.text.trim());
       else setWeeklyAI(null);
     } catch {
@@ -679,7 +651,7 @@ export default function MoodFeedPage() {
   }, [buildLocalWeeklySummary]);
 
   useEffect(() => {
-    if (user && posts.length >= 0) loadWeeklyReflection();
+    if (user) loadWeeklyReflection();
   }, [user, posts.length, loadWeeklyReflection]);
 
   /* ---------------- ✅ FOLLOW-UP DUE ---------------- */
@@ -687,8 +659,6 @@ export default function MoodFeedPage() {
   const loadFollowupDone = useCallback(async () => {
     if (!user?.id || posts.length === 0) return;
 
-    // If you create a table "mood_followups" with columns: post_id, user_id, done_at
-    // this will work. If not, it will fail gracefully.
     const postIds = posts.filter((p) => p.owner_id === user.id).map((p) => p.id);
     if (postIds.length === 0) return;
 
@@ -699,7 +669,6 @@ export default function MoodFeedPage() {
       .in("post_id", postIds);
 
     if (res.error) {
-      // table might not exist yet - ignore
       setFollowupDoneIds({});
       return;
     }
@@ -743,7 +712,6 @@ export default function MoodFeedPage() {
   const markFollowupDone = async (postId: string) => {
     if (!user?.id) return;
 
-    // store "done" (best-effort)
     const ins = await supabase.from("mood_followups").upsert(
       {
         post_id: postId,
@@ -754,7 +722,6 @@ export default function MoodFeedPage() {
     );
 
     if (ins.error) {
-      // If table not created, still let UI move on
       logErr("FOLLOWUP upsert error:", ins.error, ins);
     }
 
@@ -785,12 +752,9 @@ export default function MoodFeedPage() {
           return;
         }
 
-        image_url = supabase.storage
-          .from("mood-images")
-          .getPublicUrl(up.data.path).data.publicUrl;
+        image_url = supabase.storage.from("mood-images").getPublicUrl(up.data.path).data.publicUrl;
       }
 
-      // include energy_level, but retry if column missing
       const postDataWithEnergy: any = {
         content: content.trim() ? content.trim() : null,
         mood: selectedMood.label,
@@ -804,14 +768,13 @@ export default function MoodFeedPage() {
         ai_confidence: confidence,
         ai_reason: moodReason,
         repost_of: null,
-        energy_level: energyLevel, // ✅ NEW
+        energy_level: energyLevel,
       };
 
       let ins = await supabase.from("mood_posts").insert(postDataWithEnergy);
 
       if (ins.error) {
         const msg = safeErrMsg(ins.error);
-        // if column doesn't exist, retry without energy_level
         if (isMissingColumnError(msg) && msg.toLowerCase().includes("energy_level")) {
           const { energy_level, ...fallback } = postDataWithEnergy;
           ins = await supabase.from("mood_posts").insert(fallback);
@@ -824,7 +787,6 @@ export default function MoodFeedPage() {
         return;
       }
 
-      // reset
       setContent("");
       setSelectedMood(null);
       setConfidence(null);
@@ -907,9 +869,8 @@ export default function MoodFeedPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-      <Navbar />
-
       <main className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        {/* LEFT */}
         <div className="space-y-6">
           {/* ✅ Streak + Weekly Reflection */}
           <div className="grid md:grid-cols-2 gap-4">
@@ -953,12 +914,12 @@ export default function MoodFeedPage() {
               <button
                 onClick={() => setComposerOpen(true)}
                 className="w-full text-left text-gray-500 hover:text-gray-700"
+                type="button"
               >
                 Start a post…
               </button>
             ) : (
               <>
-                {/* ✅ Time-of-day insight */}
                 <div className="mb-3 text-sm text-gray-600">{timeOfDayInsight}</div>
 
                 <textarea
@@ -1008,9 +969,7 @@ export default function MoodFeedPage() {
                 <div className="mt-4 bg-gray-50 border rounded-2xl p-3">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-gray-800">Energy ⚡</div>
-                    {pill(
-                      energyLevel <= 2 ? "Low" : energyLevel === 3 ? "Medium" : "High"
-                    )}
+                    {pill(energyLevel <= 2 ? "Low" : energyLevel === 3 ? "Medium" : "High")}
                   </div>
                   <div className="mt-2 flex items-center gap-3">
                     <span className="text-sm">😴</span>
@@ -1116,7 +1075,6 @@ export default function MoodFeedPage() {
 
               return (
                 <div key={post.id} className="bg-white rounded-2xl shadow-sm border p-4">
-                  {/* header */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="text-sm text-gray-600">
                       <div className="font-medium text-gray-800">
@@ -1154,7 +1112,6 @@ export default function MoodFeedPage() {
                     )}
                   </div>
 
-                  {/* ✅ Follow-up banner */}
                   {post.owner_id === user?.id && FOLLOWUP_MOODS.has(post.mood) && followupDue && (
                     <div className="mt-3 rounded-2xl border bg-yellow-50 p-3">
                       <div className="text-sm font-semibold text-gray-900">
@@ -1187,7 +1144,6 @@ export default function MoodFeedPage() {
                     </div>
                   )}
 
-                  {/* content */}
                   <div className="mt-3 text-gray-900">
                     <div className="text-base">
                       <span className="mr-2">{post.mood_emoji}</span>
@@ -1206,7 +1162,6 @@ export default function MoodFeedPage() {
                       />
                     )}
 
-                    {/* AI analytics */}
                     {post.ai_detected && post.ai_confidence !== null && (
                       <div className="mt-2 text-xs text-gray-500 flex flex-wrap items-center gap-2">
                         {pill(`🧠 AI ${post.ai_confidence}%`)}
@@ -1215,9 +1170,7 @@ export default function MoodFeedPage() {
                     )}
                   </div>
 
-                  {/* actions row */}
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    {/* reactions */}
                     <div className="flex flex-wrap items-center gap-2">
                       {SUPPORTIVE_REACTIONS.map((r) => (
                         <button
@@ -1228,15 +1181,12 @@ export default function MoodFeedPage() {
                           title={r.label}
                         >
                           <span>{r.emoji}</span>
-                          <span className="text-gray-700">
-                            {reactionsMap[post.id]?.[r.key] ?? 0}
-                          </span>
+                          <span className="text-gray-700">{reactionsMap[post.id]?.[r.key] ?? 0}</span>
                         </button>
                       ))}
                     </div>
 
                     <div className="ml-auto flex items-center gap-2">
-                      {/* save */}
                       <button
                         onClick={() => toggleSave(post.id)}
                         type="button"
@@ -1247,7 +1197,6 @@ export default function MoodFeedPage() {
                         {savedMap[post.id] ? "Saved ✅" : "Save"}
                       </button>
 
-                      {/* share */}
                       <button
                         onClick={() => sharePost(post.id)}
                         type="button"
@@ -1256,7 +1205,6 @@ export default function MoodFeedPage() {
                         Share
                       </button>
 
-                      {/* repost */}
                       <button
                         onClick={() => repost(post)}
                         type="button"
@@ -1267,7 +1215,6 @@ export default function MoodFeedPage() {
                     </div>
                   </div>
 
-                  {/* comments */}
                   <div className="mt-4">
                     <button
                       className="text-sm text-blue-600 hover:underline"
@@ -1279,7 +1226,6 @@ export default function MoodFeedPage() {
 
                     {openComments[post.id] && (
                       <div className="mt-3">
-                        {/* ✅ Quick reply prompts */}
                         <div className="mb-3 flex flex-wrap gap-2">
                           {prompts.slice(0, 3).map((p, idx) => (
                             <button
@@ -1334,6 +1280,7 @@ export default function MoodFeedPage() {
           </div>
         </div>
 
+        {/* RIGHT */}
         <RightSidebar userEmail={user?.email} />
       </main>
 
