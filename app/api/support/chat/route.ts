@@ -238,6 +238,22 @@ Reply rules:
           await admin.from("chat_sessions").update({ status: "escalated" }).eq("id", sessionId);
         }
       }
+      {
+  "sessionId": "...",
+  "reply": "support message...",
+  "severity": 2,
+  "escalated": false,
+  "plan": [
+    "Do a 60-second breathing reset",
+    "Write down the main worry",
+    "Pick one next action"
+  ],
+  "tasks": [
+    { "title": "2-minute breathing", "minutes": 2 },
+    { "title": "Write 3 worries + 1 action", "minutes": 5 }
+  ]
+}
+
 
       // Provide URLs to user UI
       nextActions = {
