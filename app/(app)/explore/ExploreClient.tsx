@@ -8,6 +8,7 @@ type Profile = {
   id: string;
   username: string | null;
   full_name: string | null;
+  created_at?: string | null;
 };
 
 export default function ExploreClient() {
@@ -60,9 +61,10 @@ export default function ExploreClient() {
   /* ---------------- LOAD USERS ---------------- */
 
   const loadUsers = useCallback(async () => {
+    // ✅ include created_at if you order by it
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, username, full_name")
+      .select("id, username, full_name, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -108,10 +110,7 @@ export default function ExploreClient() {
 
       setLoading(true);
 
-      const [profiles, following] = await Promise.all([
-        loadUsers(),
-        loadFollowing(me.id),
-      ]);
+      const [profiles, following] = await Promise.all([loadUsers(), loadFollowing(me.id)]);
 
       if (!mounted) return;
 
@@ -133,42 +132,57 @@ export default function ExploreClient() {
 
     const ch = supabase
       .channel(`realtime-follows-${me.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "follows" },
-        (payload) => {
-          const rowNew = payload.new as any;
-          const rowOld = payload.old as any;
+      .on("postgres_changes", { event: "*", schema: "public", table: "follows" }, (payload) => {
+        const rowNew = payload.new as any;
+        const rowOld = payload.old as any;
 
-          // Update only when I am the follower
-          const followerId =
-            rowNew?.follower_id || rowOld?.follower_id || null;
-          if (followerId !== me.id) return;
+        // Update only when I am the follower
+        const followerId = rowNew?.follower_id || rowOld?.follower_id || null;
+        if (followerId !== me.id) return;
 
-          const followingId =
-            rowNew?.following_id || rowOld?.following_id || null;
-          if (!followingId) return;
+        const followingId = rowNew?.following_id || rowOld?.following_id || null;
+        if (!followingId) return;
 
-          if (payload.eventType === "INSERT") {
-            setFollowingMap((p) => ({ ...p, [followingId]: true }));
-          } else if (payload.eventType === "DELETE") {
-            setFollowingMap((p) => {
-              const next = { ...p };
-              delete next[followingId];
-              return next;
-            });
-          } else if (payload.eventType === "UPDATE") {
-            // not expected, but safe
-            setFollowingMap((p) => ({ ...p, [followingId]: true }));
-          }
+        if (payload.eventType === "INSERT") {
+          setFollowingMap((p) => ({ ...p, [followingId]: true }));
+        } else if (payload.eventType === "DELETE") {
+          setFollowingMap((p) => {
+            const next = { ...p };
+            delete next[followingId];
+            return next;
+          });
+        } else if (payload.eventType === "UPDATE") {
+          setFollowingMap((p) => ({ ...p, [followingId]: true }));
         }
-      )
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(ch);
     };
   }, [supabase, me?.id]);
+
+  /* ---------------- DM CONNECT (✅ FIX) ---------------- */
+  const connectToUser = async (otherUserId: string) => {
+    if (!me?.id) return;
+
+    setBusyId(otherUserId);
+
+    const { data, error } = await supabase.rpc("connect_to_user", {
+      other_user_id: otherUserId,
+    });
+
+    setBusyId(null);
+
+    if (error) {
+      alert(error.message);
+      logErr("connect_to_user error:", error);
+      return;
+    }
+
+    // ✅ data is conversationId
+    router.push(`/messages/${data}`);
+  };
 
   /* ---------------- ACTIONS ---------------- */
 
@@ -300,12 +314,14 @@ export default function ExploreClient() {
                       View
                     </button>
 
+                    {/* ✅ FIXED: use RPC connect_to_user -> conversationId */}
                     <button
-                      onClick={() => router.push(`/messages/${u.id}`)}
-                      className="px-3 py-2 text-sm rounded-xl border hover:bg-gray-50"
+                      disabled={isBusy}
+                      onClick={() => connectToUser(u.id)}
+                      className="px-3 py-2 text-sm rounded-xl border hover:bg-gray-50 disabled:opacity-50"
                       type="button"
                     >
-                      Message
+                      {isBusy ? "Opening..." : "Message"}
                     </button>
 
                     {isFollowing ? (
