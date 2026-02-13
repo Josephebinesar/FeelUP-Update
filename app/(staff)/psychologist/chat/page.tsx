@@ -24,6 +24,23 @@ function routeByEmail(email?: string | null) {
   return "/mood-feed";
 }
 
+function statusBadgeClasses(status?: TicketRow["status"]) {
+  switch (status) {
+    case "open":
+      return "border-sky-200 bg-sky-50 text-sky-800";
+    case "assigned":
+      return "border-amber-200 bg-amber-50 text-amber-900";
+    case "in_progress":
+      return "border-violet-200 bg-violet-50 text-violet-900";
+    case "resolved":
+      return "border-emerald-200 bg-emerald-50 text-emerald-900";
+    case "closed":
+      return "border-slate-200 bg-slate-50 text-slate-700";
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-700";
+  }
+}
+
 export default function PsychologistChatPage() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const sp = useSearchParams();
@@ -80,8 +97,7 @@ export default function PsychologistChatPage() {
 
       const email = user.email ?? "";
       const ok =
-        email.toLowerCase().endsWith("@psychologist.feelup") ||
-        email.toLowerCase().endsWith("@admin.feelup");
+        email.toLowerCase().endsWith("@psychologist.feelup") || email.toLowerCase().endsWith("@admin.feelup");
 
       if (!ok) {
         router.replace(routeByEmail(email));
@@ -99,12 +115,7 @@ export default function PsychologistChatPage() {
         .eq("id", ticketId)
         .single();
 
-      if (
-        !tNow.error &&
-        tNow.data &&
-        tNow.data.assigned_psychologist_id === user.id &&
-        tNow.data.status === "assigned"
-      ) {
+      if (!tNow.error && tNow.data && tNow.data.assigned_psychologist_id === user.id && tNow.data.status === "assigned") {
         await supabase.from("escalation_tickets").update({ status: "in_progress" }).eq("id", ticketId);
         await reloadTicket();
       }
@@ -137,7 +148,7 @@ export default function PsychologistChatPage() {
         )
         .subscribe();
 
-      // also watch ticket status changes (optional but helpful)
+      // also watch ticket status changes
       const ch2 = supabase
         .channel(`psy-ticket-${ticketId}`)
         .on(
@@ -165,10 +176,7 @@ export default function PsychologistChatPage() {
   async function pickup() {
     if (!ticketId || !meId) return;
 
-    const upd = await supabase
-      .from("escalation_tickets")
-      .update({ status: "assigned", assigned_psychologist_id: meId })
-      .eq("id", ticketId);
+    const upd = await supabase.from("escalation_tickets").update({ status: "assigned", assigned_psychologist_id: meId }).eq("id", ticketId);
 
     if (upd.error) {
       alert(upd.error.message);
@@ -233,105 +241,145 @@ export default function PsychologistChatPage() {
     }
   }
 
-  if (loading) return <div className="p-6">Loading chat…</div>;
+  if (loading) return <div className="min-h-screen bg-slate-50 p-6 text-slate-700">Loading chat…</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-3xl p-4">
-        <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-4 border-b flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="font-semibold">Psychologist Chat</h1>
-              <p className="text-xs text-gray-500">
-                Session: <span className="font-mono">{sessionId}</span>
-              </p>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_10px_30px_-15px_rgba(0,0,0,0.25)]">
+          {/* Header */}
+          <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
+            <div className="p-5 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-slate-900 text-white grid place-items-center text-sm font-semibold">
+                    PSY
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="truncate text-base font-semibold text-slate-900">Psychologist Chat</h1>
+                    <p className="text-xs text-slate-500">
+                      Session: <span className="font-mono">{sessionId}</span>
+                    </p>
+                  </div>
+                </div>
 
-              {ticket ? (
-                <p className="mt-1 text-xs text-gray-500">
-                  Status: <b>{ticket.status}</b> • Severity: <b>{ticket.severity}</b> • Assigned:{" "}
-                  <b>{ticket.assigned_psychologist_id ? "Yes" : "No"}</b>
-                </p>
-              ) : null}
-            </div>
+                {ticket ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 ${statusBadgeClasses(ticket.status)}`}>
+                      Status: <b>{ticket.status}</b>
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                      Severity: <b className="text-slate-900">{ticket.severity}</b>
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                      Assigned: <b className="text-slate-900">{ticket.assigned_psychologist_id ? "Yes" : "No"}</b>
+                    </span>
+                  </div>
+                ) : null}
+              </div>
 
-            <div className="flex gap-2 flex-wrap justify-end">
-              {ticket && ticket.status === "open" ? (
+              <div className="flex flex-wrap justify-end gap-2">
+                {ticket && ticket.status === "open" ? (
+                  <button
+                    onClick={pickup}
+                    className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 active:scale-[0.99]"
+                    type="button"
+                  >
+                    Assign to me
+                  </button>
+                ) : null}
+
+                {ticket && (ticket.status === "assigned" || ticket.status === "in_progress") ? (
+                  <button
+                    onClick={endConversation}
+                    className="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 active:scale-[0.99]"
+                    type="button"
+                  >
+                    End conversation
+                  </button>
+                ) : null}
+
                 <button
-                  onClick={pickup}
-                  className="rounded-xl bg-green-600 text-white px-3 py-2 text-sm hover:bg-green-700"
+                  onClick={() => router.push("/psychologist")}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.99]"
                   type="button"
                 >
-                  Assign to me
+                  Back
                 </button>
-              ) : null}
-
-              {ticket && (ticket.status === "assigned" || ticket.status === "in_progress") ? (
-                <button
-                  onClick={endConversation}
-                  className="rounded-xl bg-red-600 text-white px-3 py-2 text-sm hover:bg-red-700"
-                  type="button"
-                >
-                  End conversation
-                </button>
-              ) : null}
-
-              <button
-                onClick={() => router.push("/psychologist")}
-                className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"
-                type="button"
-              >
-                Back
-              </button>
+              </div>
             </div>
           </div>
 
+          {/* Notices */}
           {ticket?.status === "resolved" ? (
-            <div className="m-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-900">
-              This conversation is ended. The user’s AI Buddy will resume normally.
+            <div className="mx-5 mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <div className="font-medium">Conversation ended</div>
+              <div className="mt-1 text-emerald-800/80">The user’s AI Buddy will resume normally.</div>
             </div>
           ) : null}
 
           {err ? (
-            <div className="m-4 rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 text-sm">{err}</div>
+            <div className="mx-5 mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              {err}
+            </div>
           ) : null}
 
-          <div className="p-4 h-[70vh] overflow-y-auto space-y-3">
-            {msgs.map((m, idx) => {
-              const isUser = m.role === "user";
-              return (
-                <div key={m.id ?? idx} className={isUser ? "mr-auto" : "ml-auto"}>
-                  <div
-                    className={`max-w-[92%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm border ${
-                      isUser ? "bg-blue-50 text-gray-900" : "bg-gray-100 text-gray-900"
-                    }`}
-                  >
-                    {m.content}
-                    <div className="mt-1 text-[10px] opacity-60">{new Date(m.created_at).toLocaleString()}</div>
+          {/* Messages */}
+          <div className="px-5 py-5 h-[70vh] overflow-y-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-50 to-white">
+            <div className="space-y-3">
+              {msgs.map((m, idx) => {
+                const isUser = m.role === "user";
+                return (
+                  <div key={m.id ?? idx} className={isUser ? "flex justify-start" : "flex justify-end"}>
+                    <div className="max-w-[92%]">
+                      <div
+                        className={[
+                          "rounded-3xl px-4 py-3 text-sm shadow-sm border whitespace-pre-wrap",
+                          isUser ? "bg-white border-slate-200 text-slate-900" : "bg-slate-900 border-slate-900 text-white",
+                        ].join(" ")}
+                      >
+                        {m.content}
+                      </div>
+                      <div className={isUser ? "pl-2" : "pr-2 text-right"}>
+                        <span className="mt-1 inline-block text-[10px] text-slate-400">
+                          {new Date(m.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-            <div ref={bottomRef} />
+                );
+              })}
+              <div ref={bottomRef} />
+            </div>
           </div>
 
-          <div className="p-4 border-t flex gap-2">
-            <input
-              className="flex-1 rounded-xl border px-3 py-2 text-sm"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={ticket?.status === "resolved" ? "Session ended" : "Reply as psychologist…"}
-              onKeyDown={(e) => e.key === "Enter" && sendReply()}
-              disabled={ticket?.status === "resolved"}
-            />
-            <button
-              onClick={sendReply}
-              className="rounded-xl bg-green-600 px-4 py-2 text-white text-sm inline-flex items-center gap-2 disabled:opacity-60"
-              type="button"
-              disabled={ticket?.status === "resolved"}
-            >
-              <SendHorizontal className="w-4 h-4" />
-              Send
-            </button>
+          {/* Composer */}
+          <div className="border-t border-slate-200 bg-white p-4">
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <input
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:bg-slate-50"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={ticket?.status === "resolved" ? "Session ended" : "Reply as psychologist…"}
+                  onKeyDown={(e) => e.key === "Enter" && sendReply()}
+                  disabled={ticket?.status === "resolved"}
+                />
+                <div className="mt-2 text-[11px] text-slate-500">
+                  Tip: Press <b>Enter</b> to send.
+                </div>
+              </div>
+
+              <button
+                onClick={sendReply}
+                className="rounded-2xl bg-emerald-600 px-5 py-3 text-white text-sm font-medium inline-flex items-center gap-2 shadow-sm hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
+                type="button"
+                disabled={ticket?.status === "resolved"}
+              >
+                <SendHorizontal className="w-4 h-4" />
+                Send
+              </button>
+            </div>
           </div>
         </div>
       </div>

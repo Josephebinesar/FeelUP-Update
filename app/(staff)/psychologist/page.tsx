@@ -29,6 +29,12 @@ function severityLabel(sev: number) {
   return "Low";
 }
 
+function severityBadge(sev: number) {
+  if (sev >= 5) return "border-rose-200 bg-rose-50 text-rose-900";
+  if (sev >= 3) return "border-amber-200 bg-amber-50 text-amber-900";
+  return "border-emerald-200 bg-emerald-50 text-emerald-900";
+}
+
 export default function PsychologistDashboard() {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -50,9 +56,7 @@ export default function PsychologistDashboard() {
     }
 
     const email = user.email ?? "";
-    const ok =
-      email.toLowerCase().endsWith("@psychologist.feelup") ||
-      email.toLowerCase().endsWith("@admin.feelup");
+    const ok = email.toLowerCase().endsWith("@psychologist.feelup") || email.toLowerCase().endsWith("@admin.feelup");
 
     if (!ok) {
       router.replace(routeByEmail(email));
@@ -116,17 +120,13 @@ export default function PsychologistDashboard() {
     if (!me) return;
     if (!confirm("Pick up this ticket and assign it to you?")) return;
 
-    const upd = await supabase
-      .from("escalation_tickets")
-      .update({ status: "assigned", assigned_psychologist_id: me.id })
-      .eq("id", ticketId);
+    const upd = await supabase.from("escalation_tickets").update({ status: "assigned", assigned_psychologist_id: me.id }).eq("id", ticketId);
 
     if (upd.error) {
       alert(upd.error.message);
       return;
     }
 
-    // set psychologist unavailable while working
     const busy = await supabase.from("psychologists").update({ is_available: false }).eq("user_id", me.id);
     if (busy.error) console.warn("Failed to set psychologist unavailable:", busy.error.message);
 
@@ -155,7 +155,6 @@ export default function PsychologistDashboard() {
       return;
     }
 
-    // set psychologist available again
     const free = await supabase.from("psychologists").update({ is_available: true }).eq("user_id", me.id);
     if (free.error) console.warn("Failed to set psychologist available:", free.error.message);
 
@@ -163,9 +162,7 @@ export default function PsychologistDashboard() {
   }
 
   function openChat(ticket: Ticket) {
-    router.push(
-      `/psychologist/chat?ticketId=${encodeURIComponent(ticket.id)}&sessionId=${encodeURIComponent(ticket.session_id)}`
-    );
+    router.push(`/psychologist/chat?ticketId=${encodeURIComponent(ticket.id)}&sessionId=${encodeURIComponent(ticket.session_id)}`);
   }
 
   async function logout() {
@@ -174,71 +171,93 @@ export default function PsychologistDashboard() {
     router.refresh();
   }
 
-  if (loading) return <div className="p-6">Loading psychologist…</div>;
+  if (loading) return <div className="min-h-screen bg-slate-50 p-6 text-slate-700">Loading psychologist…</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white px-4 py-6">
       <div className="mx-auto max-w-6xl space-y-6">
-        <div className="bg-white border rounded-2xl p-5 shadow-sm flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">Psychologist Dashboard</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              Logged in as <b>{me?.email}</b>
+        {/* Top card */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.25)] flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-slate-900">Psychologist Dashboard</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Logged in as <b className="text-slate-900">{me?.email}</b>
             </p>
           </div>
 
-          <button onClick={logout} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50" type="button">
+          <button
+            onClick={logout}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.99]"
+            type="button"
+          >
             Sign out
           </button>
         </div>
 
         {err ? (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 text-sm">{err}</div>
+          <div className="rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{err}</div>
         ) : null}
 
         {/* Open tickets */}
-        <div className="bg-white border rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">Open tickets</h2>
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-slate-900">Open tickets</h2>
+              <p className="text-xs text-slate-500 mt-1">Pick up tickets to work on them. You can also open chat.</p>
+            </div>
+
             <button
               onClick={() => me && loadTickets(me.id)}
-              className="text-sm border rounded-xl px-3 py-2 hover:bg-gray-50"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.99]"
               type="button"
             >
               Refresh
             </button>
           </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-5 space-y-3">
             {openTickets.length === 0 ? (
-              <div className="text-sm text-gray-500">No open tickets right now.</div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No open tickets right now.
+              </div>
             ) : (
               openTickets.map((t) => (
-                <div key={t.id} className="rounded-xl border p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">
-                      Ticket: <span className="font-mono">{t.id.slice(0, 8)}…</span>
+                <div
+                  key={t.id}
+                  className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900">
+                      Ticket: <span className="font-mono font-medium">{t.id.slice(0, 8)}…</span>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Severity: <b>{t.severity}</b> ({severityLabel(t.severity)}) •{" "}
-                      {new Date(t.created_at).toLocaleString()}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Session: <span className="font-mono">{t.session_id.slice(0, 10)}…</span>
+
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      <span className={`rounded-full border px-3 py-1 ${severityBadge(t.severity)}`}>
+                        Severity: <b>{t.severity}</b> ({severityLabel(t.severity)})
+                      </span>
+
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                        Created: <b className="text-slate-900">{new Date(t.created_at).toLocaleString()}</b>
+                      </span>
+
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                        Session: <span className="font-mono">{t.session_id.slice(0, 10)}…</span>
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 justify-end">
                     <button
                       onClick={() => pickup(t.id)}
-                      className="text-sm rounded-xl bg-green-600 text-white px-4 py-2 hover:bg-green-700"
+                      className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 active:scale-[0.99]"
                       type="button"
                     >
                       Pick up
                     </button>
+
                     <button
                       onClick={() => openChat(t)}
-                      className="text-sm rounded-xl border px-4 py-2 hover:bg-gray-50"
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.99]"
                       type="button"
                     >
                       Open chat
@@ -250,29 +269,44 @@ export default function PsychologistDashboard() {
           </div>
         </div>
 
-        {/* My assigned / in progress */}
-        <div className="bg-white border rounded-2xl p-5 shadow-sm">
-          <h2 className="font-semibold">My tickets</h2>
+        {/* My tickets */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div>
+            <h2 className="font-semibold text-slate-900">My tickets</h2>
+            <p className="text-xs text-slate-500 mt-1">Assigned and in-progress tickets.</p>
+          </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-5 space-y-3">
             {myTickets.length === 0 ? (
-              <div className="text-sm text-gray-500">No assigned tickets.</div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No assigned tickets.
+              </div>
             ) : (
               myTickets.map((t) => (
-                <div key={t.id} className="rounded-xl border p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">
-                      Ticket: <span className="font-mono">{t.id.slice(0, 8)}…</span>
+                <div
+                  key={t.id}
+                  className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900">
+                      Ticket: <span className="font-mono font-medium">{t.id.slice(0, 8)}…</span>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Status: <b>{t.status}</b> • Severity: <b>{t.severity}</b> ({severityLabel(t.severity)})
+
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                        Status: <b className="text-slate-900">{t.status}</b>
+                      </span>
+
+                      <span className={`rounded-full border px-3 py-1 ${severityBadge(t.severity)}`}>
+                        Severity: <b>{t.severity}</b> ({severityLabel(t.severity)})
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 justify-end">
                     <button
                       onClick={() => openChat(t)}
-                      className="text-sm rounded-xl bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
+                      className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 active:scale-[0.99]"
                       type="button"
                     >
                       Open chat
@@ -280,7 +314,7 @@ export default function PsychologistDashboard() {
 
                     <button
                       onClick={() => endTicket(t.id)}
-                      className="text-sm rounded-xl border px-4 py-2 hover:bg-gray-50"
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.99]"
                       type="button"
                     >
                       End
@@ -291,7 +325,7 @@ export default function PsychologistDashboard() {
             )}
           </div>
 
-          <div className="mt-3 text-xs text-gray-500">
+          <div className="mt-4 text-xs text-slate-500">
             Ending a ticket sets status to <b>resolved</b> and resumes the user’s AI Buddy.
           </div>
         </div>

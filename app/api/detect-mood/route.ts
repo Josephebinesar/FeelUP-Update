@@ -1,3 +1,4 @@
+// app/api/detect-mood/route.ts
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -37,23 +38,40 @@ function norm(s: string) {
   return String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function extractTextFromResponsesPayload(data: any): string | null {
-  if (typeof data?.output_text === "string" && data.output_text.trim()) {
-    return data.output_text.trim();
-  }
-  const out = data?.output;
-  if (Array.isArray(out)) {
-    for (const item of out) {
-      const content = item?.content;
-      if (Array.isArray(content)) {
-        for (const c of content) {
-          if (typeof c?.text === "string" && c.text.trim()) return c.text.trim();
-          if (typeof c?.text?.value === "string" && c.text.value.trim()) return c.text.value.trim();
-        }
-      }
-    }
-  }
-  return null;
+/**
+ * Map GoEmotions labels -> your UI moods
+ * Model outputs many labels; we map them down to your 8 moods.
+ */
+function mapLabelToMood(label: string): MoodLabel {
+  const s = String(label || "").toLowerCase();
+
+  // Happy
+  if (["joy", "amusement", "optimism", "pride", "relief"].includes(s)) return "Happy";
+
+  // Calm (closest)
+  if (["neutral", "admiration", "approval", "realization"].includes(s)) return "Calm";
+
+  // Excited
+  if (["excitement", "surprise"].includes(s)) return "Excited";
+
+  // Grateful
+  if (["gratitude"].includes(s)) return "Grateful";
+
+  // Thoughtful
+  if (["curiosity", "confusion", "desire"].includes(s)) return "Thoughtful";
+
+  // Sad
+  if (["sadness", "disappointment", "grief", "remorse", "embarrassment"].includes(s)) return "Sad";
+
+  // Anxious
+  if (["fear", "nervousness", "anxiety"].includes(s)) return "Anxious";
+
+  // Tired (no direct label in GoEmotions; map low-energy feelings if present)
+  if (["tired", "fatigue"].includes(s)) return "Tired";
+
+  // fallback mappings
+  if (["anger", "annoyance", "disapproval"].includes(s)) return "Anxious";
+  return "Thoughtful";
 }
 
 export async function POST(req: Request) {
@@ -67,90 +85,83 @@ export async function POST(req: Request) {
     const cached = CACHE.get(key);
     if (cached) return NextResponse.json(cached);
 
-    // Cloudflare Workers AI configuration
-    const workersUrl = process.env.WORKERS_AI_URL;
-    if (!workersUrl) {
-      return noSuggestion("WORKERS_AI_URL missing in .env.local (server).");
+    const hfKey = process.env.HF_API_KEY;
+    if (!hfKey) {
+      return noSuggestion("HF_API_KEY missing in .env.local (server).");
     }
 
-    const schema = {
-      type: "object",
-      additionalProperties: false,
-      required: ["mood", "confidence", "reason"],
-      properties: {
-        mood: {
-          type: "string",
-          enum: ["Happy", "Calm", "Excited", "Grateful", "Thoughtful", "Sad", "Anxious", "Tired"],
-        },
-        confidence: { type: "number", minimum: 50, maximum: 95 },
-        reason: { type: "string", minLength: 1, maxLength: 140 },
-      },
-    } as const;
+    // Router endpoint (api-inference is deprecated; use router.huggingface.co/hf-inference) :contentReference[oaicite:2]{index=2}
+    const MODEL_ID = "SamLowe/roberta-base-go_emotions";
+    const MODEL_URL = `https://router.huggingface.co/hf-inference/models/${encodeURIComponent(MODEL_ID)}`;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 9000);
+    const timeout = setTimeout(() => controller.abort(), 12000);
 
-    // Call Cloudflare Worker
-    const r = await fetch(workersUrl, {
+    const r = await fetch(MODEL_URL, {
       method: "POST",
       signal: controller.signal,
       headers: {
+        Authorization: `Bearer ${hfKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        text: raw,
-        systemPrompt: [
-          "Classify the user's message into exactly ONE mood from the list.",
-          "Pick the closest mood even if the message is short.",
-          "Do NOT default to Thoughtful unless the text is reflective (thinking/meaning/unsure).",
-          "If positive like 'today is good' => Happy.",
-          "If stress/overwhelm like 'day is hectic' => Anxious.",
-          "Return ONLY strict JSON.",
-        ].join(" "),
-        schema,
-      }),
+      body: JSON.stringify({ inputs: raw }),
     });
 
     clearTimeout(timeout);
 
-    // handle non-OK
     if (!r.ok) {
       const errText = await r.text().catch(() => "");
-      console.error("detect-mood Cloudflare Worker error:", r.status, errText);
+      console.error("HuggingFace router error:", r.status, errText);
 
-      // QUOTA / BILLING
-      if (r.status === 429) {
-        return noSuggestion(
-          "AI quota/billing exceeded (429). Check Cloudflare Workers AI limits."
-        );
+      if (r.status === 401 || r.status === 403) {
+        return noSuggestion("HuggingFace auth failed. Check token permissions (Inference Providers).");
       }
-
-      return noSuggestion(`AI request failed (${r.status}). Check server logs.`);
+      if (r.status === 429) {
+        return noSuggestion("HuggingFace rate limit hit (429). Try again later.");
+      }
+      // Some models/providers may return 410/404 if not available on hf-inference
+      return noSuggestion(`HuggingFace request failed (${r.status}). Check server logs.`);
     }
 
     const data = await r.json();
-    const outputText = extractTextFromResponsesPayload(data);
-    if (!outputText) return noSuggestion("AI response unreadable. Check server logs.", data);
 
-    let parsed: { mood: MoodLabel; confidence: number; reason: string };
-    try {
-      parsed = JSON.parse(outputText);
-    } catch {
-      return noSuggestion("AI returned invalid JSON. Check server logs.", { outputText });
+    // Router + hf-inference commonly returns: [[{label, score}, ...]]
+    const arr = Array.isArray(data) ? data : null;
+    const candidates = Array.isArray(arr?.[0]) ? arr?.[0] : [];
+
+    if (!candidates.length) {
+      console.error("HF returned unexpected shape:", data);
+      return noSuggestion("AI response unreadable. Check server logs.", data);
     }
 
+    const top = candidates.reduce(
+      (best: any, cur: any) => (cur?.score > best?.score ? cur : best),
+      candidates[0]
+    );
+
+    const topLabel = String(top?.label || "");
+    const topScore = Number(top?.score || 0);
+
+    const mood = mapLabelToMood(topLabel);
+
+    // keep your UI-style confidence band
+    const confidence = Math.max(50, Math.min(95, Math.round(topScore * 100)));
+    const reason = `Detected emotional tone: ${topLabel}`;
+
     const result = {
-      mood: parsed.mood,
-      emoji: emojiFor(parsed.mood),
-      confidence: Math.max(50, Math.min(95, Math.round(Number(parsed.confidence)))),
-      reason: String(parsed.reason || "").slice(0, 140),
+      mood,
+      emoji: emojiFor(mood),
+      confidence,
+      reason,
     };
 
-    // store cache
+    // cache (TypeScript-safe eviction)
     CACHE.set(key, result);
     if (CACHE.size > MAX_CACHE) {
-      const first = CACHE.keys().next().value;
-      CACHE.delete(first);
+      const iterator = CACHE.keys().next();
+      if (!iterator.done) {
+        CACHE.delete(iterator.value);
+      }
     }
 
     return NextResponse.json(result);
