@@ -28,11 +28,10 @@ const SUPPORTIVE_REACTIONS = [
 
 type ReactionKey = (typeof SUPPORTIVE_REACTIONS)[number]["key"];
 type Visibility = "public" | "followers" | "mutuals";
-
 type ProfileLite = { full_name: string | null; username: string | null };
 
 const REACTION_COL = "reaction_type";
-const PROFILES_FK_REL = "mood_posts_owner_id_fkey";
+const PROFILES_FK_REL = "mood_posts_owner_id_fkey"; // your real FK name
 
 function safeErrMsg(err: any) {
   return (
@@ -41,15 +40,14 @@ function safeErrMsg(err: any) {
     "Unknown error"
   );
 }
-function isMissingColumnError(msg: string) {
-  return msg.toLowerCase().includes("does not exist") && msg.toLowerCase().includes("column");
-}
-function extractMissingColumn(msg: string): string | null {
-  const m = msg.match(/column\s+"([^"]+)"/i);
-  return m?.[1] ?? null;
-}
-function startOfLocalDay(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// ✅ NEW: extract hashtags from post text
+function extractHashtags(text: string): string[] {
+  const matches = text.match(/#([\p{L}\p{N}_]+)/gu) || [];
+  const tags = matches
+    .map((m) => m.slice(1).toLowerCase().trim())
+    .filter(Boolean);
+  return Array.from(new Set(tags)).slice(0, 20);
 }
 
 export default function MoodFeedPage() {
@@ -69,10 +67,10 @@ export default function MoodFeedPage() {
   const [visibility, setVisibility] = useState<Visibility>("public");
   const [posting, setPosting] = useState(false);
 
-  // ✅ energy
+  // energy
   const [energyLevel, setEnergyLevel] = useState<number>(3);
 
-  // ✅ AI suggestion (NOT auto-setting mood anymore)
+  // AI suggestion (optional)
   const [detectingMood, setDetectingMood] = useState(false);
   const [suggestedMood, setSuggestedMood] = useState<any>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -89,17 +87,21 @@ export default function MoodFeedPage() {
   const [reactionsMap, setReactionsMap] = useState<Record<string, any>>({});
   const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
 
+  // saved posts map (postId -> true)
+  const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
+
+  // repost modal
+  const [repostModal, setRepostModal] = useState<
+    null | { post: any; caption: string; visibility: Visibility; anonymous: boolean }
+  >(null);
+  const [reposting, setReposting] = useState(false);
+
   // realtime refs
   const openCommentsRef = useRef<Record<string, boolean>>({});
-  const postIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     openCommentsRef.current = openComments;
   }, [openComments]);
-
-  useEffect(() => {
-    postIdsRef.current = posts.map((p: any) => p.id).filter(Boolean);
-  }, [posts]);
 
   const logErr = (label: string, err: any, extra?: any) => {
     const msg = safeErrMsg(err);
@@ -112,6 +114,15 @@ export default function MoodFeedPage() {
     console.error(`${label} ${code ? `[${code}]` : ""} ${msg}`);
     if (extra !== undefined) console.error(`${label} extra:`, extra);
   };
+
+  // ✅ NEW: mark user active (for "Active this week")
+  const markActive = useCallback(async () => {
+    if (!user?.id) return;
+    await supabase
+      .from("profiles")
+      .update({ last_active_at: new Date().toISOString() })
+      .eq("id", user.id);
+  }, [supabase, user?.id]);
 
   const pill = (text: string) => (
     <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] text-gray-600 bg-gray-50">
@@ -164,9 +175,8 @@ export default function MoodFeedPage() {
     };
   }, [router, supabase]);
 
-  /* ---------------- AI MOOD SUGGESTION (Cleaner) ---------------- */
+  /* ---------------- AI MOOD SUGGESTION ---------------- */
   useEffect(() => {
-    // ✅ if user already picked a mood, no AI suggestion needed
     if (selectedMood) return;
 
     const txt = content.trim();
@@ -188,7 +198,9 @@ export default function MoodFeedPage() {
         });
 
         const data = await res.json();
-        const mood = moodOptions.find((m) => m.label.toLowerCase() === String(data?.mood || "").toLowerCase());
+        const mood = moodOptions.find(
+          (m) => m.label.toLowerCase() === String(data?.mood || "").toLowerCase()
+        );
 
         if (mood) {
           setSuggestedMood(mood);
@@ -220,7 +232,10 @@ export default function MoodFeedPage() {
     async (postId: string) => {
       if (!postId) return;
 
-      const res = await supabase.from("post_reactions").select(REACTION_COL).eq("post_id", postId);
+      const res = await supabase
+        .from("post_reactions")
+        .select(REACTION_COL)
+        .eq("post_id", postId);
 
       if (res.error) {
         logErr("LOAD REACTIONS ERROR:", res.error, res);
@@ -228,7 +243,13 @@ export default function MoodFeedPage() {
         return;
       }
 
-      const counts: Record<string, number> = { CHEER: 0, SUPPORT: 0, HUG: 0, LOVE: 0 };
+      const counts: Record<string, number> = {
+        CHEER: 0,
+        SUPPORT: 0,
+        HUG: 0,
+        LOVE: 0,
+      };
+
       (res.data || []).forEach((r: any) => {
         const key = r?.[REACTION_COL] as string | undefined;
         if (!key) return;
@@ -268,7 +289,71 @@ export default function MoodFeedPage() {
       if (ins.error) logErr("toggleReaction insert error:", ins.error, ins);
     }
 
+    // ✅ mark active
+    markActive();
+
     loadReactions(postId);
+  };
+
+  /* ---------------- SAVED POSTS ---------------- */
+  const loadSavedForFeed = useCallback(
+    async (postIds: string[]) => {
+      if (!user?.id) return;
+      if (postIds.length === 0) {
+        setSavedMap({});
+        return;
+      }
+
+      const res = await supabase
+        .from("saved_posts")
+        .select("post_id")
+        .eq("user_id", user.id)
+        .in("post_id", postIds);
+
+      if (res.error) {
+        logErr("LOAD SAVED ERROR:", res.error, res);
+        return;
+      }
+
+      const map: Record<string, boolean> = {};
+      (res.data || []).forEach((r: any) => {
+        if (r?.post_id) map[r.post_id] = true;
+      });
+      setSavedMap(map);
+    },
+    [supabase, user?.id]
+  );
+
+  const toggleSave = async (postId: string) => {
+    if (!user?.id) return;
+
+    const isSaved = !!savedMap[postId];
+    setSavedMap((p) => ({ ...p, [postId]: !isSaved }));
+
+    if (isSaved) {
+      const del = await supabase
+        .from("saved_posts")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("post_id", postId);
+
+      if (del.error) {
+        setSavedMap((p) => ({ ...p, [postId]: true }));
+        alert(del.error.message || "Failed to unsave");
+        return;
+      }
+    } else {
+      const ins = await supabase.from("saved_posts").insert({ user_id: user.id, post_id: postId });
+
+      if (ins.error) {
+        setSavedMap((p) => ({ ...p, [postId]: false }));
+        alert(ins.error.message || "Failed to save");
+        return;
+      }
+    }
+
+    // ✅ mark active
+    markActive();
   };
 
   /* ---------------- LOAD POSTS ---------------- */
@@ -287,10 +372,9 @@ export default function MoodFeedPage() {
         visibility,
         owner_id,
         created_at,
-        ai_detected,
-        ai_confidence,
-        ai_reason,
         energy_level,
+        reposted_from,
+        hashtags,
         profiles:profiles!${PROFILES_FK_REL} (
           full_name,
           username
@@ -306,23 +390,58 @@ export default function MoodFeedPage() {
     }
 
     const list = res.data || [];
-    setPosts(list);
 
-    list.forEach((p: any) => {
+    const ids = list.map((p: any) => p.id).filter(Boolean);
+    loadSavedForFeed(ids);
+
+    const originalIds = Array.from(new Set(list.map((p: any) => p.reposted_from).filter(Boolean)));
+
+    let originalsById: Record<string, any> = {};
+    if (originalIds.length > 0) {
+      const originalsRes = await supabase
+        .from("mood_posts")
+        .select(
+          `
+          id,
+          content,
+          mood,
+          mood_emoji,
+          mood_color,
+          image_url,
+          owner_id,
+          created_at,
+          hashtags
+        `
+        )
+        .in("id", originalIds);
+
+      if (!originalsRes.error) {
+        originalsById = Object.fromEntries((originalsRes.data || []).map((o: any) => [o.id, o]));
+      }
+    }
+
+    const merged = list.map((p: any) => ({
+      ...p,
+      original: p.reposted_from ? originalsById[p.reposted_from] || null : null,
+    }));
+
+    setPosts(merged);
+
+    merged.forEach((p: any) => {
       if (p?.id) loadReactions(p.id);
     });
-  }, [supabase, loadReactions]);
+  }, [supabase, loadReactions, loadSavedForFeed]);
 
   useEffect(() => {
     if (user) loadPosts();
   }, [user, loadPosts]);
 
-  /* ---------------- COMMENTS ---------------- */
+  /* ---------------- COMMENTS (✅ FIXED: post_comments table) ---------------- */
   const loadComments = useCallback(
     async (postId: string) => {
       const res = await supabase
-        .from("comments")
-        .select("id, post_id, user_id, content, created_at")
+        .from("post_comments")
+        .select("id, post_id, user_id, content, anonymous, created_at")
         .eq("post_id", postId)
         .order("created_at");
 
@@ -337,11 +456,19 @@ export default function MoodFeedPage() {
       let profilesById: Record<string, any> = {};
       if (userIds.length > 0) {
         const profRes = await supabase.from("profiles").select("id, full_name, username").in("id", userIds);
-        if (profRes.error) logErr("LOAD COMMENT PROFILES ERROR:", profRes.error, profRes);
-        else profilesById = Object.fromEntries((profRes.data || []).map((p: any) => [p.id, p]));
+
+        if (!profRes.error) {
+          profilesById = Object.fromEntries((profRes.data || []).map((p: any) => [p.id, p]));
+        } else {
+          logErr("LOAD COMMENT PROFILES ERROR:", profRes.error, profRes);
+        }
       }
 
-      const merged = list.map((c: any) => ({ ...c, profiles: profilesById[c.user_id] || null }));
+      const merged = list.map((c: any) => ({
+        ...c,
+        profiles: profilesById[c.user_id] || null,
+      }));
+
       setComments((p) => ({ ...p, [postId]: merged }));
     },
     [supabase]
@@ -358,10 +485,12 @@ export default function MoodFeedPage() {
     const text = (newComment[postId] ?? "").trim();
     if (!text) return;
 
-    const res = await supabase.from("comments").insert({
+    const res = await supabase.from("post_comments").insert({
       post_id: postId,
       user_id: user.id,
+      user_email: user.email ?? null,
       content: text,
+      anonymous: false, // keep comment names visible; change if you want
     });
 
     if (res.error) {
@@ -370,11 +499,14 @@ export default function MoodFeedPage() {
       return;
     }
 
+    // ✅ mark active
+    markActive();
+
     setNewComment((p) => ({ ...p, [postId]: "" }));
     loadComments(postId);
   };
 
-  /* ---------------- CREATE POST ---------------- */
+  /* ---------------- CREATE POST (✅ hashtags + last_active_at) ---------------- */
   const submitPost = async () => {
     if (!user) return alert("User not ready. Please refresh.");
     if (!selectedMood) return alert("Please select a mood (or use suggestion)");
@@ -397,7 +529,10 @@ export default function MoodFeedPage() {
         image_url = supabase.storage.from("mood-images").getPublicUrl(up.data.path).data.publicUrl;
       }
 
-      const basePayload: any = {
+      // ✅ NEW: tags from content
+      const tags = extractHashtags(content || "");
+
+      const payload: any = {
         content: content.trim() ? content.trim() : null,
         mood: selectedMood.label,
         mood_emoji: selectedMood.emoji,
@@ -406,31 +541,22 @@ export default function MoodFeedPage() {
         visibility,
         owner_id: user.id,
         image_url,
-        ai_detected: false,
-        ai_confidence: null,
-        ai_reason: null,
         energy_level: energyLevel,
+
+        // ✅ NEW
+        hashtags: tags,
       };
 
-      let payload = { ...basePayload };
-      let ins = await supabase.from("mood_posts").insert(payload);
-
-      while (ins.error) {
-        const msg = safeErrMsg(ins.error);
-        if (!isMissingColumnError(msg)) break;
-
-        const missing = extractMissingColumn(msg);
-        if (!missing || !(missing in payload)) break;
-
-        delete payload[missing];
-        ins = await supabase.from("mood_posts").insert(payload);
-      }
+      const ins = await supabase.from("mood_posts").insert(payload);
 
       if (ins.error) {
         alert(ins.error.message || "Failed to share post");
         logErr("Post insert error:", ins.error, ins);
         return;
       }
+
+      // ✅ NEW: mark active
+      await markActive();
 
       setContent("");
       setSelectedMood(null);
@@ -444,11 +570,63 @@ export default function MoodFeedPage() {
 
       if (imagePreview) URL.revokeObjectURL(imagePreview);
       setImagePreview(null);
-      setComposerOpen(false);
 
+      setComposerOpen(false);
       loadPosts();
     } finally {
       setPosting(false);
+    }
+  };
+
+  /* ---------------- REPOST (optional: hashtags from caption + original) ---------------- */
+  const openRepost = (post: any) => {
+    setRepostModal({
+      post,
+      caption: "",
+      visibility: "public",
+      anonymous: false,
+    });
+  };
+
+  const doRepost = async () => {
+    if (!user?.id || !repostModal) return;
+
+    setReposting(true);
+    try {
+      const original = repostModal.post?.original || repostModal.post;
+
+      // tags: caption tags + original tags (merged)
+      const captionTags = extractHashtags(repostModal.caption || "");
+      const originalTags: string[] = Array.isArray(original?.hashtags) ? original.hashtags : [];
+      const tags = Array.from(new Set([...captionTags, ...originalTags])).slice(0, 20);
+
+      const payload: any = {
+        owner_id: user.id,
+        content: repostModal.caption.trim() ? repostModal.caption.trim() : null,
+        mood: original?.mood || null,
+        mood_emoji: original?.mood_emoji || null,
+        mood_color: original?.mood_color || null,
+        image_url: original?.image_url || null,
+        visibility: repostModal.visibility,
+        anonymous: repostModal.anonymous,
+        reposted_from: original?.id,
+        energy_level: null,
+        hashtags: tags,
+      };
+
+      const ins = await supabase.from("mood_posts").insert(payload);
+
+      if (ins.error) {
+        alert(ins.error.message || "Failed to repost");
+        return;
+      }
+
+      await markActive();
+
+      setRepostModal(null);
+      loadPosts();
+    } finally {
+      setReposting(false);
     }
   };
 
@@ -456,9 +634,7 @@ export default function MoodFeedPage() {
   useEffect(() => {
     const postsChannel = supabase
       .channel("realtime-posts")
-      .on("postgres_changes", { event: "*", schema: "public", table: "mood_posts" }, () => {
-        loadPosts();
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "mood_posts" }, () => loadPosts())
       .subscribe();
 
     const reactionsChannel = supabase
@@ -469,9 +645,10 @@ export default function MoodFeedPage() {
       })
       .subscribe();
 
+    // ✅ FIXED table name: post_comments
     const commentsChannel = supabase
       .channel("realtime-comments")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "comments" }, (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_comments" }, (payload) => {
         const postId = (payload.new as any)?.post_id;
         if (postId && openCommentsRef.current[postId]) {
           loadComments(postId);
@@ -495,7 +672,11 @@ export default function MoodFeedPage() {
           {/* Composer */}
           <div className="bg-white rounded-2xl shadow-sm border p-4">
             {!composerOpen ? (
-              <button onClick={() => setComposerOpen(true)} className="w-full text-left text-gray-500 hover:text-gray-700" type="button">
+              <button
+                onClick={() => setComposerOpen(true)}
+                className="w-full text-left text-gray-500 hover:text-gray-700"
+                type="button"
+              >
                 Start a post…
               </button>
             ) : (
@@ -504,12 +685,12 @@ export default function MoodFeedPage() {
 
                 <textarea
                   className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  placeholder="How are you feeling? (optional)"
+                  placeholder="How are you feeling? (optional)  Try #happy #study"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                 />
 
-                {/* ✅ AI suggestion box */}
+                {/* AI suggestion */}
                 {detectingMood ? (
                   <p className="text-xs text-gray-400 mt-2">🧠 Suggesting a mood…</p>
                 ) : suggestedMood && !selectedMood ? (
@@ -520,7 +701,9 @@ export default function MoodFeedPage() {
                         <span className="font-semibold">
                           {suggestedMood.emoji} {suggestedMood.label}
                         </span>
-                        {confidence !== null ? <span className="ml-2 text-xs text-gray-500">(AI {confidence}%)</span> : null}
+                        {confidence !== null ? (
+                          <span className="ml-2 text-xs text-gray-500">(AI {confidence}%)</span>
+                        ) : null}
                       </div>
                       <button
                         type="button"
@@ -576,7 +759,14 @@ export default function MoodFeedPage() {
                   </div>
                   <div className="mt-2 flex items-center gap-3">
                     <span className="text-sm">😴</span>
-                    <input type="range" min={1} max={5} value={energyLevel} onChange={(e) => setEnergyLevel(Number(e.target.value))} className="w-full" />
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      value={energyLevel}
+                      onChange={(e) => setEnergyLevel(Number(e.target.value))}
+                      className="w-full"
+                    />
                     <span className="text-sm">🚀</span>
                   </div>
                 </div>
@@ -584,14 +774,22 @@ export default function MoodFeedPage() {
                 {/* Visibility + Anonymous */}
                 <div className="mt-4 flex items-center gap-2">
                   <span className="text-sm text-gray-600">Visibility</span>
-                  <select className="border rounded-lg px-3 py-1.5 text-sm bg-white" value={visibility} onChange={(e) => setVisibility(e.target.value as Visibility)}>
+                  <select
+                    className="border rounded-lg px-3 py-1.5 text-sm bg-white"
+                    value={visibility}
+                    onChange={(e) => setVisibility(e.target.value as Visibility)}
+                  >
                     <option value="public">Public</option>
                     <option value="followers">Friend circle (followers)</option>
                     <option value="mutuals">Close friends (mutuals)</option>
                   </select>
 
                   <label className="ml-auto text-sm text-gray-600 flex items-center gap-2">
-                    <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={anonymous}
+                      onChange={(e) => setAnonymous(e.target.checked)}
+                    />
                     Anonymous
                   </label>
                 </div>
@@ -599,12 +797,20 @@ export default function MoodFeedPage() {
                 {/* Image */}
                 {imagePreview && (
                   <div className="mt-4">
-                    <img src={imagePreview} className="rounded-2xl max-h-[420px] w-full object-cover border" alt="preview" />
+                    <img
+                      src={imagePreview}
+                      className="rounded-2xl max-h-[420px] w-full object-cover border"
+                      alt="preview"
+                    />
                   </div>
                 )}
 
                 <div className="flex items-center justify-between mt-4 gap-2">
-                  <button type="button" onClick={() => imageInputRef.current?.click()} className="text-sm border px-3 py-2 rounded-xl hover:bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="text-sm border px-3 py-2 rounded-xl hover:bg-gray-50"
+                  >
                     Add Image
                   </button>
 
@@ -623,7 +829,12 @@ export default function MoodFeedPage() {
                     }}
                   />
 
-                  <button disabled={!selectedMood || posting} onClick={submitPost} className="bg-blue-600 disabled:opacity-40 text-white px-4 py-2 rounded-xl" type="button">
+                  <button
+                    disabled={!selectedMood || posting}
+                    onClick={submitPost}
+                    className="bg-blue-600 disabled:opacity-40 text-white px-4 py-2 rounded-xl"
+                    type="button"
+                  >
                     {posting ? "Posting..." : "Share ✨"}
                   </button>
                 </div>
@@ -634,7 +845,15 @@ export default function MoodFeedPage() {
           {/* Posts */}
           <div className="space-y-4">
             {posts.map((post) => {
-              const name = post.anonymous ? "Anonymous" : (post.profiles as ProfileLite | null)?.full_name || (post.profiles as ProfileLite | null)?.username || "User";
+              const name = post.anonymous
+                ? "Anonymous"
+                : (post.profiles as ProfileLite | null)?.full_name ||
+                  (post.profiles as ProfileLite | null)?.username ||
+                  "User";
+
+              const isSaved = !!savedMap[post.id];
+              const original = post.original as any | null;
+              const isRepost = !!post.reposted_from;
 
               return (
                 <div key={post.id} className="bg-white rounded-2xl shadow-sm border p-4">
@@ -651,19 +870,80 @@ export default function MoodFeedPage() {
                             <span>⚡ {post.energy_level}/5</span>
                           </>
                         ) : null}
+                        {isRepost ? (
+                          <>
+                            <span>•</span>
+                            <span>↪️ Repost</span>
+                          </>
+                        ) : null}
                       </div>
+
+                      {/* ✅ show hashtags */}
+                      {Array.isArray(post.hashtags) && post.hashtags.length > 0 ? (
+                        <div className="mt-1 text-xs text-purple-700 flex flex-wrap gap-2">
+                          {post.hashtags.slice(0, 8).map((t: string) => (
+                            <span key={t} className="px-2 py-0.5 rounded-full bg-purple-50 border border-purple-200">
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
+
+                    {/* Save button */}
+                    <button
+                      type="button"
+                      onClick={() => toggleSave(post.id)}
+                      className="text-xs px-3 py-1.5 rounded-full border hover:bg-gray-50"
+                      title={isSaved ? "Unsave" : "Save"}
+                    >
+                      {isSaved ? "🔖 Saved" : "🔖 Save"}
+                    </button>
                   </div>
 
+                  {/* Post content */}
                   <div className="mt-3 text-gray-900">
                     <div className="text-base">
                       <span className="mr-2">{post.mood_emoji}</span>
-                      {post.content ? <span className="whitespace-pre-wrap">{post.content}</span> : <span className="text-gray-400">(no text)</span>}
+                      {post.content ? (
+                        <span className="whitespace-pre-wrap">{post.content}</span>
+                      ) : (
+                        <span className="text-gray-400">(no text)</span>
+                      )}
                     </div>
 
-                    {post.image_url && <img src={post.image_url} className="mt-3 rounded-2xl max-h-[520px] w-full object-cover border" alt="post" />}
+                    {post.image_url ? (
+                      <img
+                        src={post.image_url}
+                        className="mt-3 rounded-2xl max-h-[520px] w-full object-cover border"
+                        alt="post"
+                      />
+                    ) : null}
+
+                    {/* Original card (for repost) */}
+                    {isRepost && original ? (
+                      <div className="mt-3 border rounded-2xl p-3 bg-gray-50">
+                        <div className="text-xs text-gray-500 mb-1">Original</div>
+                        <div className="text-sm text-gray-900">
+                          <span className="mr-2">{original.mood_emoji}</span>
+                          {original.content ? (
+                            <span className="whitespace-pre-wrap">{original.content}</span>
+                          ) : (
+                            <span className="text-gray-400">(no text)</span>
+                          )}
+                        </div>
+                        {original.image_url ? (
+                          <img
+                            src={original.image_url}
+                            className="mt-2 rounded-xl max-h-[420px] w-full object-cover border"
+                            alt="original"
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
 
+                  {/* Actions */}
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <div className="flex flex-wrap items-center gap-2">
                       {SUPPORTIVE_REACTIONS.map((r) => (
@@ -678,25 +958,47 @@ export default function MoodFeedPage() {
                           <span className="text-gray-700">{reactionsMap[post.id]?.[r.key] ?? 0}</span>
                         </button>
                       ))}
+
+                      {/* Repost */}
+                      <button
+                        type="button"
+                        onClick={() => openRepost(post)}
+                        className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
+                        title="Repost"
+                      >
+                        ↪️ Repost
+                      </button>
                     </div>
 
                     <div className="ml-auto">
-                      <button className="text-sm text-blue-600 hover:underline" onClick={() => toggleCommentsPanel(post.id)} type="button">
+                      <button
+                        className="text-sm text-blue-600 hover:underline"
+                        onClick={() => toggleCommentsPanel(post.id)}
+                        type="button"
+                      >
                         💬 {openComments[post.id] ? "Hide comments" : "Comments"}
                       </button>
                     </div>
                   </div>
 
+                  {/* Comments */}
                   {openComments[post.id] && (
                     <div className="mt-3">
                       <div className="space-y-2">
-                        {(comments[post.id] || []).map((c) => (
-                          <div key={c.id} className="text-sm">
-                            <span className="font-medium text-gray-800">{c.profiles?.full_name || c.profiles?.username || "User"}</span>
-                            <span className="text-gray-500"> · </span>
-                            <span className="text-gray-700">{c.content}</span>
-                          </div>
-                        ))}
+                        {(comments[post.id] || []).map((c) => {
+                          const commenterName =
+                            c.anonymous
+                              ? "Anonymous"
+                              : c.profiles?.full_name || c.profiles?.username || "User";
+
+                          return (
+                            <div key={c.id} className="text-sm">
+                              <span className="font-medium text-gray-800">{commenterName}</span>
+                              <span className="text-gray-500"> · </span>
+                              <span className="text-gray-700">{c.content}</span>
+                            </div>
+                          );
+                        })}
                       </div>
 
                       <div className="flex gap-2 mt-3">
@@ -711,7 +1013,11 @@ export default function MoodFeedPage() {
                           }
                           placeholder="No links. Keep it supportive…"
                         />
-                        <button onClick={() => addComment(post.id)} className="text-sm bg-blue-600 text-white px-4 rounded-xl" type="button">
+                        <button
+                          onClick={() => addComment(post.id)}
+                          className="text-sm bg-blue-600 text-white px-4 rounded-xl"
+                          type="button"
+                        >
                           Send
                         </button>
                       </div>
@@ -727,6 +1033,71 @@ export default function MoodFeedPage() {
       </main>
 
       <Footer />
+
+      {/* Repost Modal */}
+      {repostModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-2xl w-full max-w-md space-y-4 border">
+            <div className="text-lg font-semibold">↪️ Repost</div>
+
+            <textarea
+              className="w-full border rounded-xl px-3 py-2"
+              placeholder="Add a caption (optional)  Try #motivation"
+              value={repostModal.caption}
+              onChange={(e) =>
+                setRepostModal((p) => (p ? { ...p, caption: e.target.value } : p))
+              }
+            />
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Visibility</span>
+              <select
+                className="border rounded-lg px-3 py-1.5 text-sm bg-white"
+                value={repostModal.visibility}
+                onChange={(e) =>
+                  setRepostModal((p) =>
+                    p ? { ...p, visibility: e.target.value as Visibility } : p
+                  )
+                }
+              >
+                <option value="public">Public</option>
+                <option value="followers">Friend circle (followers)</option>
+                <option value="mutuals">Close friends (mutuals)</option>
+              </select>
+
+              <label className="ml-auto text-sm text-gray-600 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={repostModal.anonymous}
+                  onChange={(e) =>
+                    setRepostModal((p) => (p ? { ...p, anonymous: e.target.checked } : p))
+                  }
+                />
+                Anonymous
+              </label>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setRepostModal(null)}
+                className="px-4 py-2 rounded border bg-white"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={doRepost}
+                disabled={reposting}
+                className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-60"
+              >
+                {reposting ? "Reposting..." : "Repost"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

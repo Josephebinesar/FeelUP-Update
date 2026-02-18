@@ -4,7 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
-import { Users, Lock, Globe, UserPlus, LogOut, ChevronRight } from "lucide-react";
+import {
+  Users,
+  Lock,
+  Globe,
+  UserPlus,
+  LogOut,
+  ChevronRight,
+  Sparkles,
+  Shield,
+} from "lucide-react";
 
 type Circle = {
   id: string;
@@ -29,10 +38,50 @@ function safeMsg(err: any) {
   );
 }
 
+function cx(...s: Array<string | false | undefined | null>) {
+  return s.filter(Boolean).join(" ");
+}
+
 function visMeta(v?: string | null) {
-  if (v === "circle") return { icon: <Lock className="w-4 h-4" />, label: "Invite-only" };
-  if (v === "followers") return { icon: <Users className="w-4 h-4" />, label: "Followers" };
+  if (v === "circle")
+    return { icon: <Lock className="w-4 h-4" />, label: "Invite-only" };
+  if (v === "followers")
+    return { icon: <Users className="w-4 h-4" />, label: "Followers" };
   return { icon: <Globe className="w-4 h-4" />, label: "Public" };
+}
+
+function Toast({ msg, onClose }: { msg: string; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 2200);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50">
+      <div className="px-4 py-2 rounded-full bg-black text-white text-sm shadow-lg">
+        {msg}
+      </div>
+    </div>
+  );
+}
+
+function GlassShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-purple-100 via-pink-50 to-blue-100 px-4 py-10">
+      <div className="max-w-4xl mx-auto">{children}</div>
+    </div>
+  );
+}
+
+function Card3D({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <div className="absolute -inset-1 rounded-[28px] bg-gradient-to-r from-purple-400/40 via-pink-400/30 to-blue-400/40 blur-xl opacity-70" />
+      <div className="relative rounded-[28px] border border-white/60 bg-white/70 backdrop-blur-xl shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
+        {children}
+      </div>
+    </div>
+  );
 }
 
 export default function CircleDetailPage() {
@@ -49,8 +98,11 @@ export default function CircleDetailPage() {
   const [memberCount, setMemberCount] = useState<number>(0);
   const [myRole, setMyRole] = useState<string | null>(null); // "admin" | "member" | null
   const isMember = !!myRole;
+  const isAdmin = myRole === "admin";
 
   const [actionBusy, setActionBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (m: string) => setToast(m);
 
   /* ---------------- AUTH ---------------- */
 
@@ -87,14 +139,13 @@ export default function CircleDetailPage() {
       .single();
 
     if (res.error) {
-      alert("Failed to load circle: " + safeMsg(res.error));
+      showToast("Failed to load circle: " + safeMsg(res.error));
       setCircle(null);
       return;
     }
 
     setCircle(res.data as any);
 
-    // owner profile
     const ownerRes = await supabase
       .from("profiles")
       .select("id, full_name, username")
@@ -128,7 +179,6 @@ export default function CircleDetailPage() {
       .maybeSingle();
 
     if (res.error) {
-      // If row not found, maybeSingle gives null data (no error)
       setMyRole(null);
       return;
     }
@@ -150,15 +200,12 @@ export default function CircleDetailPage() {
   const joinCircle = async () => {
     if (!me?.id || !circle?.id) return;
 
-    // Simple rule:
-    // - public: allow join
-    // - followers / circle: block here (invite flow will handle later)
     if (circle.visibility === "followers") {
-      alert("This circle is followers-only. (Next: we’ll connect follow/invite logic.)");
+      showToast("Followers-only (invite/follow logic coming next).");
       return;
     }
     if (circle.visibility === "circle") {
-      alert("This circle is invite-only. Ask an admin to invite you.");
+      showToast("Invite-only. Ask an admin to invite you.");
       return;
     }
 
@@ -173,19 +220,28 @@ export default function CircleDetailPage() {
     setActionBusy(false);
 
     if (ins.error) {
-      alert("Join failed: " + safeMsg(ins.error));
+      const msg = safeMsg(ins.error).toLowerCase();
+      // safe if unique constraint exists; treat duplicates as success
+      if (msg.includes("duplicate") || msg.includes("unique")) {
+        await loadMemberCount();
+        await loadMyRole();
+        showToast("Already a member ✅");
+        return;
+      }
+      showToast("Join failed: " + safeMsg(ins.error));
       return;
     }
 
     await loadMemberCount();
     await loadMyRole();
+    showToast("Joined ✅");
   };
 
   const leaveCircle = async () => {
     if (!me?.id || !circle?.id) return;
 
     if (myRole === "admin") {
-      alert("Admins can’t leave. Transfer admin role first (or delete the circle later).");
+      showToast("Admins can’t leave. Transfer admin first.");
       return;
     }
 
@@ -202,29 +258,45 @@ export default function CircleDetailPage() {
     setActionBusy(false);
 
     if (del.error) {
-      alert("Leave failed: " + safeMsg(del.error));
+      showToast("Leave failed: " + safeMsg(del.error));
       return;
     }
 
     await loadMemberCount();
     await loadMyRole();
+    showToast("Left circle ✅");
   };
 
-  /* ---------------- REALTIME ---------------- */
+  /* ---------------- REALTIME (FILTERED) ---------------- */
 
   useEffect(() => {
     if (!id) return;
 
     const ch = supabase
       .channel(`circle-${id}-realtime`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "circle_members" }, () => {
-        loadMemberCount();
-        loadMyRole();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "community_circles" }, (p) => {
-        const rowId = (p.new as any)?.id || (p.old as any)?.id;
-        if (rowId === id) loadCircle();
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "circle_members",
+          filter: `circle_id=eq.${id}`,
+        },
+        () => {
+          loadMemberCount();
+          loadMyRole();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "community_circles",
+          filter: `id=eq.${id}`,
+        },
+        () => loadCircle()
+      )
       .subscribe();
 
     return () => {
@@ -235,67 +307,80 @@ export default function CircleDetailPage() {
   /* ---------------- UI ---------------- */
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading…</div>;
+    return (
+      <GlassShell>
+        <div className="text-center text-gray-700">Loading…</div>
+      </GlassShell>
+    );
   }
 
   if (!circle) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-600">
-        Circle not found.
-      </div>
+      <GlassShell>
+        <div className="text-center text-gray-700">Circle not found.</div>
+      </GlassShell>
     );
   }
 
   const vis = visMeta(circle.visibility);
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="max-w-3xl mx-auto">
-        {/* Top bar */}
-        <div className="flex items-center justify-between mb-5">
-          <button
-            onClick={() => router.back()}
-            className="text-sm font-semibold text-purple-700 hover:underline"
-            type="button"
-          >
-            ← Back
-          </button>
+    <GlassShell>
+      {toast && <Toast msg={toast} onClose={() => setToast(null)} />}
 
-          <Link
-            href={`/community/circles/${circle.id}/members`}
-            className="text-sm font-semibold text-purple-700 inline-flex items-center gap-1 hover:underline"
-          >
-            Members <ChevronRight className="w-4 h-4" />
-          </Link>
-        </div>
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => router.back()}
+          className="text-sm font-semibold text-purple-800 hover:underline"
+          type="button"
+        >
+          ← Back
+        </button>
 
-        {/* Card */}
-        <div className="bg-white rounded-2xl shadow-sm border p-6">
-          <div className="flex items-start justify-between gap-3">
+        <Link
+          href={`/community/circles/${circle.id}/members`}
+          className="text-sm font-semibold text-purple-800 inline-flex items-center gap-1 hover:underline"
+        >
+          Members <ChevronRight className="w-4 h-4" />
+        </Link>
+      </div>
+
+      <Card3D>
+        <div className="p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-gray-900 truncate">{circle.name}</h1>
-              <p className="text-sm text-gray-600 mt-1">
+              <div className="inline-flex items-center gap-2">
+                <div className="w-11 h-11 rounded-2xl bg-white shadow flex items-center justify-center">
+                  <Sparkles className="w-6 h-6 text-purple-700" />
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 truncate">
+                  {circle.name}
+                </h1>
+              </div>
+
+              <p className="text-sm text-gray-700 mt-3 max-w-2xl">
                 {circle.description || "A trusted space for sharing moods and reflections."}
               </p>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-gray-50 text-gray-700">
-                  {vis.icon} {vis.label}
+              <div className="mt-5 flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-white/60 backdrop-blur text-gray-800 shadow-sm">
+                  {vis.icon} <b>{vis.label}</b>
                 </span>
 
-                <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-gray-50 text-gray-700">
-                  <Users className="w-4 h-4" /> {memberCount} members
+                <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-white/60 backdrop-blur text-gray-800 shadow-sm">
+                  <Users className="w-4 h-4" /> <b>{memberCount}</b> members
                 </span>
 
                 {owner && (
-                  <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-gray-50 text-gray-700">
-                    Owner: {owner.full_name || owner.username || "User"}
+                  <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-white/60 backdrop-blur text-gray-800 shadow-sm">
+                    Owner: <b>{owner.full_name || owner.username || "User"}</b>
                   </span>
                 )}
 
                 {myRole && (
-                  <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-purple-50 text-purple-800 border-purple-200">
-                    Your role: {myRole}
+                  <span className="inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full border bg-purple-50 text-purple-900 border-purple-200 shadow-sm">
+                    {isAdmin ? <Shield className="w-4 h-4" /> : null}
+                    Your role: <b>{myRole}</b>
                   </span>
                 )}
               </div>
@@ -303,12 +388,17 @@ export default function CircleDetailPage() {
           </div>
 
           {/* Actions */}
-          <div className="mt-6 flex flex-col sm:flex-row gap-2">
+          <div className="mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {!isMember ? (
               <button
                 onClick={joinCircle}
                 disabled={actionBusy}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-purple-700 text-white hover:bg-purple-800 disabled:opacity-50"
+                className={cx(
+                  "sm:col-span-2 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl",
+                  "bg-gradient-to-r from-purple-700 via-fuchsia-700 to-indigo-700 text-white",
+                  "shadow-[0_16px_50px_-20px_rgba(88,28,135,0.6)]",
+                  "hover:brightness-110 active:scale-[0.99] transition disabled:opacity-50"
+                )}
                 type="button"
               >
                 <UserPlus className="w-4 h-4" />
@@ -318,7 +408,12 @@ export default function CircleDetailPage() {
               <button
                 onClick={leaveCircle}
                 disabled={actionBusy}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border bg-white hover:bg-gray-50 disabled:opacity-50"
+                className={cx(
+                  "sm:col-span-2 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl",
+                  "border bg-white/70 backdrop-blur hover:bg-white",
+                  "shadow-[0_16px_45px_-25px_rgba(0,0,0,0.35)]",
+                  "active:scale-[0.99] transition disabled:opacity-50"
+                )}
                 type="button"
               >
                 <LogOut className="w-4 h-4" />
@@ -328,7 +423,12 @@ export default function CircleDetailPage() {
 
             <button
               onClick={() => router.push(`/community/circles/${circle.id}/members`)}
-              className="sm:w-[200px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
+              className={cx(
+                "inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl",
+                "border bg-white/70 backdrop-blur hover:bg-white",
+                "shadow-[0_16px_45px_-25px_rgba(0,0,0,0.35)]",
+                "active:scale-[0.99] transition"
+              )}
               type="button"
             >
               <Users className="w-4 h-4" />
@@ -336,15 +436,17 @@ export default function CircleDetailPage() {
             </button>
           </div>
 
-          {/* Placeholder section for circle posts */}
-          <div className="mt-7 border-t pt-5">
-            <h2 className="font-bold text-gray-900 mb-2">Circle Posts (coming next)</h2>
-            <p className="text-sm text-gray-600">
+          {/* Placeholder section */}
+          <div className="mt-8 border-t border-white/60 pt-6">
+            <h2 className="font-extrabold text-gray-900 mb-2">
+              Circle Posts (coming next)
+            </h2>
+            <p className="text-sm text-gray-700">
               Next step: show mood posts visible only to this circle ✅
             </p>
           </div>
         </div>
-      </div>
-    </div>
+      </Card3D>
+    </GlassShell>
   );
 }

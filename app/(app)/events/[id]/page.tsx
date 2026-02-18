@@ -3,7 +3,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
-import { Calendar, Clock, MapPin, Users, Share2, Bell, User, Video, Timer, Gauge, IndianRupee } from "lucide-react";
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  Users,
+  Share2,
+  Bell,
+  User,
+  Video,
+  Timer,
+  Gauge,
+  IndianRupee,
+  Bookmark,
+  BookmarkCheck,
+} from "lucide-react";
 
 type RSVPStatus = "going" | "interested";
 
@@ -48,7 +62,14 @@ export default function EventDetailPage() {
   const [organizer, setOrganizer] = useState<Profile | null>(null);
 
   const [rsvp, setRsvp] = useState<RSVPStatus | null>(null);
-  const [reminders, setReminders] = useState<{ "1h": boolean; "1d": boolean }>({ "1h": false, "1d": false });
+  const [reminders, setReminders] = useState<{ "1h": boolean; "1d": boolean }>({
+    "1h": false,
+    "1d": false,
+  });
+
+  // ✅ NEW: saved status
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentText, setCommentText] = useState("");
@@ -57,6 +78,24 @@ export default function EventDetailPage() {
 
   const attendeesShown = (e: EventRow) => (e.attendees_count ?? e.attendees ?? 0) as number;
   const safeTime = (t: string | null) => (t ? t.slice(0, 5) : "—");
+
+  const loadSaved = useCallback(async () => {
+    if (!userId) return setSaved(false);
+
+    const res = await supabase
+      .from("event_saves")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("event_id", id)
+      .maybeSingle();
+
+    if (res.error) {
+      // If table missing or RLS blocked, just show unsaved
+      setSaved(false);
+      return;
+    }
+    setSaved(!!res.data?.id);
+  }, [supabase, userId, id]);
 
   const load = useCallback(async () => {
     const e = await supabase
@@ -75,7 +114,12 @@ export default function EventDetailPage() {
 
     setEvent(e.data as any);
 
-    const p = await supabase.from("profiles").select("id,full_name,username").eq("id", e.data.organizer).maybeSingle();
+    const p = await supabase
+      .from("profiles")
+      .select("id,full_name,username")
+      .eq("id", e.data.organizer)
+      .maybeSingle();
+
     if (!p.error) setOrganizer((p.data as any) || null);
 
     if (userId) {
@@ -94,10 +138,15 @@ export default function EventDetailPage() {
         .eq("user_id", userId);
 
       if (!rm.error) {
-        const map = { "1h": false, "1d": false };
+        const map = { "1h": false, "1d": false } as any;
         (rm.data || []).forEach((x: any) => (map[x.kind] = true));
         setReminders(map);
       }
+
+      // ✅ load saved
+      await loadSaved();
+    } else {
+      setSaved(false);
     }
 
     const c = await supabase
@@ -122,7 +171,7 @@ export default function EventDetailPage() {
     }
 
     setComments(list.map((x) => ({ ...x, profiles: profilesById[x.user_id] || null })));
-  }, [supabase, id, userId]);
+  }, [supabase, id, userId, loadSaved]);
 
   useEffect(() => {
     let mounted = true;
@@ -155,12 +204,17 @@ export default function EventDetailPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "event_reminders" }, (p) => {
         if ((p.new as any)?.event_id === id || (p.old as any)?.event_id === id) load();
       })
+      // ✅ NEW: saves realtime
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_saves" }, (p) => {
+        const row: any = p.new || p.old;
+        if (userId && row?.user_id === userId && row?.event_id === id) loadSaved();
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [supabase, id, load]);
+  }, [supabase, id, load, userId, loadSaved]);
 
   async function share() {
     try {
@@ -172,9 +226,38 @@ export default function EventDetailPage() {
     }
   }
 
+  // ✅ NEW: Save/Unsave
+  async function toggleSave() {
+    if (!userId) return router.push("/login");
+    setSaving(true);
+    try {
+      if (saved) {
+        const del = await supabase
+          .from("event_saves")
+          .delete()
+          .eq("user_id", userId)
+          .eq("event_id", id);
+
+        if (del.error) logErr("UNSAVE ERROR:", del.error);
+      } else {
+        const ins = await supabase.from("event_saves").insert({
+          user_id: userId,
+          event_id: id,
+        });
+        if (ins.error) logErr("SAVE ERROR:", ins.error);
+      }
+      await loadSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function setRSVP(status: RSVPStatus) {
     if (!userId) return router.push("/login");
-    const res = await supabase.from("event_rsvps").upsert({ event_id: id, user_id: userId, status }, { onConflict: "user_id,event_id" });
+    const res = await supabase.from("event_rsvps").upsert(
+      { event_id: id, user_id: userId, status },
+      { onConflict: "user_id,event_id" }
+    );
     if (res.error) logErr("RSVP ERROR:", res.error);
     load();
   }
@@ -256,9 +339,23 @@ export default function EventDetailPage() {
               </div>
             </div>
 
-            <button onClick={share} className="p-2 rounded-lg hover:bg-gray-100" title="Share" type="button">
-              <Share2 className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {/* ✅ Save */}
+              <button
+                onClick={toggleSave}
+                className={`p-2 rounded-lg hover:bg-gray-100 ${saved ? "text-green-700" : ""}`}
+                title={saved ? "Saved" : "Save"}
+                type="button"
+                disabled={saving}
+              >
+                {saved ? <BookmarkCheck className="w-5 h-5" /> : <Bookmark className="w-5 h-5" />}
+              </button>
+
+              {/* Share */}
+              <button onClick={share} className="p-2 rounded-lg hover:bg-gray-100" title="Share" type="button">
+                <Share2 className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {event.description && <p className="mt-4 text-gray-700">{event.description}</p>}
