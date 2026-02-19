@@ -1,280 +1,162 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 export const runtime = "nodejs";
 
-function userClient(accessToken: string | null) {
+const WORKER_URL = process.env.FEELUP_SUPPORT_WORKER_URL!;
+
+function supabaseAnonWithBearer(accessToken: string | null) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  if (!url || !anon) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
+
   return createClient(url, anon, {
     global: { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
 }
 
-function adminClient() {
+function supabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createClient(url, service);
+  if (!url || !service) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+
+  return createClient(url, service, { auth: { persistSession: false } });
 }
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+type Body = { sessionId?: string; message?: string };
+type MsgRow = { role: "user" | "assistant"; content: string; created_at: string };
 
-type ReqBody = { sessionId?: string; message: string };
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+async function ensureChatSession(admin: any, sessionId: string, userId: string) {
+  return admin.from("chat_sessions").upsert({ id: sessionId, user_id: userId }, { onConflict: "id" });
 }
 
-type RiskJson = {
-  severity: 0 | 1 | 2 | 3 | 4;
-  needs_human: boolean;
-  immediate_danger: boolean;
-  reason: string;
-};
+async function ensureTicketAdmin(opts: { admin: any; userId: string; sessionId: string; severity: number }) {
+  const { admin, userId, sessionId, severity } = opts;
 
-type SupportJson = {
-  reply: string;
-  actionPlan: string[];
-  journalPrompt: string;
-  groundingExercise: string;
-};
+  const existing = await admin
+    .from("escalation_tickets")
+    .select("id,status")
+    .eq("user_id", userId)
+    .eq("session_id", sessionId)
+    .in("status", ["open", "assigned", "in_progress"])
+    .limit(1);
 
-function safeJsonParse<T>(raw: string, fallback: T): T {
-  try { return JSON.parse(raw) as T; } catch { return fallback; }
+  if (existing.error) return { ok: false, step: "select_existing", error: existing.error };
+  if (existing.data?.length) return { ok: true, ticketId: existing.data[0].id, created: false };
+
+  const ins = await admin.from("escalation_tickets").insert({
+    user_id: userId,
+    session_id: sessionId,
+    severity,
+    severity_score: severity,
+    summary: `Escalation triggered by AI Buddy (severity ${severity}).`,
+    status: "open",
+    assigned_psychologist_id: null,
+  });
+
+  if (ins.error) return { ok: false, step: "insert_ticket", error: ins.error };
+
+  const latest = await admin
+    .from("escalation_tickets")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (latest.error) return { ok: false, step: "select_latest", error: latest.error };
+  return { ok: true, ticketId: latest.data?.[0]?.id ?? null, created: true };
 }
 
 export async function POST(req: Request) {
   try {
+    if (!WORKER_URL) {
+      return NextResponse.json({ error: "Missing FEELUP_SUPPORT_WORKER_URL" }, { status: 500 });
+    }
+
     const accessToken = req.headers.get("authorization")?.replace("Bearer ", "") ?? null;
-    const supabase = userClient(accessToken);
+    const supabase = supabaseAnonWithBearer(accessToken);
+    const admin = supabaseAdmin();
 
-    const { data: authData } = await supabase.auth.getUser();
-    if (!authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const user = authData.user;
-
-    const body = (await req.json()) as ReqBody;
-    const userMessage = (body.message || "").trim();
-    if (!userMessage) return NextResponse.json({ error: "Message is required" }, { status: 400 });
-
-    // Ensure session
-    let sessionId = body.sessionId;
-    if (!sessionId) {
-      const { data: newSession, error } = await supabase
-        .from("chat_sessions")
-        .insert({ user_id: user.id })
-        .select("id")
-        .single();
-      if (error || !newSession?.id) return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
-      sessionId = newSession.id;
+    // ✅ require login (your DB uses user_id + RLS)
+    const { data: u, error: uErr } = await supabase.auth.getUser();
+    if (uErr || !u.user) {
+      return NextResponse.json({ error: "Unauthorized", details: uErr?.message ?? "No user session" }, { status: 401 });
     }
 
-    // Store user message
-    const { error: insertUserErr } = await supabase.from("chat_messages").insert({
-      session_id: sessionId,
-      user_id: user.id,
-      role: "user",
-      content: userMessage,
-    });
-    if (insertUserErr) return NextResponse.json({ error: "Failed to store message" }, { status: 500 });
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const message = (body.message || "").trim();
+    if (!message) return NextResponse.json({ error: "Missing message" }, { status: 400 });
 
-    // Load history
-    const { data: history, error: histErr } = await supabase
+    const sessionId = body.sessionId || crypto.randomUUID();
+
+    // ✅ FIX: ensure chat_sessions row exists so FK never fails
+    const sesUp = await ensureChatSession(admin, sessionId, u.user.id);
+    if (sesUp.error) {
+      return NextResponse.json({ error: "Session upsert failed", details: sesUp.error }, { status: 500 });
+    }
+
+    // Load last 20 messages for context
+    const { data: history, error: hErr } = await admin
       .from("chat_messages")
-      .select("role, content")
+      .select("role,content,created_at")
       .eq("session_id", sessionId)
-      .order("created_at", { ascending: false })
-      .limit(12);
-    if (histErr) return NextResponse.json({ error: "Failed to load history" }, { status: 500 });
-    const ordered = (history ?? []).reverse();
+      .eq("user_id", u.user.id)
+      .order("created_at", { ascending: true })
+      .limit(20);
 
-    // Risk classifier
-    const riskPrompt = `
-Return JSON only: {"severity":0|1|2|3|4,"needs_human":true|false,"immediate_danger":true|false,"reason":"short"}.
-0 normal stress / breakup sadness
-1 moderate distress
-2 high distress, needs professional support soon
-3 urgent crisis / self-harm thoughts / abuse / violence
-4 emergency: plan/intent/immediate danger
-needs_human=true if severity>=2.
-immediate_danger=true only if imminent risk.
-`;
+    const safeHistory: Array<{ role: "user" | "assistant"; content: string }> =
+      !hErr && Array.isArray(history)
+        ? (history as MsgRow[])
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => ({ role: m.role, content: m.content }))
+        : [];
 
-    const riskResp = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      temperature: 0,
-      messages: [
-        { role: "system", content: riskPrompt },
-        ...ordered.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-      ],
-      response_format: { type: "json_object" },
+    // Call Worker
+    const workerRes = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, userId: u.user.id, message, history: safeHistory }),
     });
 
-    const risk = safeJsonParse<RiskJson>(riskResp.choices[0]?.message?.content || "{}", {
-      severity: 0, needs_human: false, immediate_danger: false, reason: "ok",
-    });
-
-    const severity = clamp(Number(risk.severity ?? 0), 0, 4) as 0|1|2|3|4;
-    const shouldEscalate = Boolean(risk.needs_human) || severity >= 2;
-    const isUrgent = severity >= 3 || Boolean(risk.immediate_danger);
-
-    // Assistant + support cards
-    const assistantPrompt = `
-You are FeelUp Support Buddy (NOT a doctor).
-Return JSON ONLY:
-{"reply":"string","actionPlan":["a","b","c"],"journalPrompt":"string","groundingExercise":"string"}
-
-Reply rules:
-- Warm, short, non-judgmental.
-- Ask ONE question at the end.
-- Always include: "I’m not a doctor—just an assistant."
-- If breakup: validate + suggest boundary (mute/unfollow) + 1 small action.
-- If urgent: encourage contacting local emergency services or trusted person.
-`;
-
-    const assistantResp = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      temperature: 0.7,
-      messages: [
-        { role: "system", content: assistantPrompt + (isUrgent ? "\nUser is urgent. Be extra safety-focused." : "") },
-        ...ordered.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-      ],
-      response_format: { type: "json_object" },
-    });
-
-    const support = safeJsonParse<SupportJson>(assistantResp.choices[0]?.message?.content || "{}", {
-      reply: "I’m here with you.\n\nI’m not a doctor—just an assistant.\n\nWhat’s going on right now?",
-      actionPlan: ["Take 10 slow breaths", "Drink water + eat something small", "Message a trusted person"],
-      journalPrompt: "What are you feeling right now, and what do you need most today?",
-      groundingExercise: "Name 5 things you see, 4 you feel, 3 you hear, 2 you smell, 1 you taste.",
-    });
-
-    let assistantText = (support.reply || "").trim();
-
-    // Escalation nudge (convincing + CTA)
-    let nextActions: { chatNowUrl?: string; scheduleUrl?: string } = {};
-    if (shouldEscalate) {
-      assistantText +=
-        "\n\nI’m really glad you shared this with me. I can stay with you here, but a real psychologist can help you more effectively.\n" +
-        "I can connect you to a FeelUp psychologist now.\n" +
-        "Would you like to **Chat now** or **Schedule a video call**?";
+    const workerJson = await workerRes.json().catch(() => ({}));
+    if (!workerRes.ok) {
+      return NextResponse.json({ error: "Worker error", details: workerJson }, { status: 500 });
     }
 
-    // Store assistant
-    const { error: insertAsstErr } = await supabase.from("chat_messages").insert({
-      session_id: sessionId,
-      user_id: user.id,
-      role: "assistant",
-      content: assistantText,
-      severity_score: severity,
-    });
-    if (insertAsstErr) return NextResponse.json({ error: "Failed to store assistant message" }, { status: 500 });
+    const reply = String(workerJson.reply || "");
+    const severity = typeof workerJson.severity === "number" ? workerJson.severity : null;
+    const escalated = Boolean(workerJson.escalated);
+    const plan = Array.isArray(workerJson.plan) ? workerJson.plan : [];
+    const tasks = Array.isArray(workerJson.tasks) ? workerJson.tasks : [];
 
-    // Ticket creation/assignment
+    // Save both messages
+    const insMsgs = await admin.from("chat_messages").insert([
+      { session_id: sessionId, user_id: u.user.id, role: "user", content: message },
+      { session_id: sessionId, user_id: u.user.id, role: "assistant", content: reply },
+    ]);
+
+    if (insMsgs.error) {
+      return NextResponse.json({ error: "DB insert failed", details: insMsgs.error }, { status: 500 });
+    }
+
+    // Ticket creation if escalated
     let ticketId: string | null = null;
-    let assignedPsychologistId: string | null = null;
+    let ticketDebug: any = null;
 
-    if (shouldEscalate) {
-      // Create or reuse pending ticket (under user auth)
-      const { data: existing } = await supabase
-        .from("escalation_tickets")
-        .select("id, assigned_psychologist_id, status")
-        .eq("session_id", sessionId)
-        .eq("status", "pending")
-        .maybeSingle();
-
-      if (existing?.id) {
-        ticketId = existing.id;
-        assignedPsychologistId = existing.assigned_psychologist_id ?? null;
-      } else {
-        const summaryResp = await openai.chat.completions.create({
-          model: "gpt-4.1-mini",
-          temperature: 0,
-          messages: [
-            { role: "system", content: "Summarize for psychologist in 4-6 lines. No diagnosis. Include risk signals." },
-            ...ordered.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-          ],
-        });
-
-        const summary = (summaryResp.choices[0]?.message?.content || "Needs professional support.").trim();
-
-        const { data: ticket, error: ticketErr } = await supabase
-          .from("escalation_tickets")
-          .insert({
-            session_id: sessionId,
-            user_id: user.id,
-            severity_score: severity,
-            summary,
-            status: "pending",
-          })
-          .select("id")
-          .single();
-
-        if (!ticketErr && ticket?.id) ticketId = ticket.id;
+    if (escalated && typeof severity === "number") {
+      const t = await ensureTicketAdmin({ admin, userId: u.user.id, sessionId, severity });
+      if (!t.ok) ticketDebug = { step: (t as any).step, ticket_error: (t as any).error?.message ?? String((t as any).error) };
+      else {
+        ticketId = t.ticketId ?? null;
+        ticketDebug = { created: t.created, ticketId };
       }
-
-      // ✅ urgent: auto-assign available psychologist (SERVICE ROLE)
-      if (isUrgent && ticketId) {
-        const admin = adminClient();
-
-        const { data: available } = await admin
-          .from("psychologists")
-          .select("user_id")
-          .eq("is_available", true)
-          .order("created_at", { ascending: true })
-          .limit(1);
-
-        const picked = available?.[0]?.user_id ?? null;
-
-        if (picked) {
-          assignedPsychologistId = picked;
-
-          await admin
-            .from("escalation_tickets")
-            .update({ assigned_psychologist_id: picked, status: "assigned" })
-            .eq("id", ticketId);
-
-          await admin.from("chat_sessions").update({ status: "escalated" }).eq("id", sessionId);
-        }
-      }
-      {
-  "sessionId": "...",
-  "reply": "support message...",
-  "severity": 2,
-  "escalated": false,
-  "plan": [
-    "Do a 60-second breathing reset",
-    "Write down the main worry",
-    "Pick one next action"
-  ],
-  "tasks": [
-    { "title": "2-minute breathing", "minutes": 2 },
-    { "title": "Write 3 worries + 1 action", "minutes": 5 }
-  ]
-}
-
-
-      // Provide URLs to user UI
-      nextActions = {
-        chatNowUrl: ticketId ? `/psych-chat?sessionId=${sessionId}&ticketId=${ticketId}` : undefined,
-        scheduleUrl: ticketId ? `/schedule-call?ticketId=${ticketId}` : undefined,
-      };
     }
 
-    return NextResponse.json({
-      sessionId,
-      reply: assistantText,
-      severity,
-      escalated: shouldEscalate,
-      ticketId,
-      assignedPsychologistId,
-      actionPlan: Array.isArray(support.actionPlan) ? support.actionPlan.slice(0, 3) : [],
-      journalPrompt: String(support.journalPrompt || ""),
-      groundingExercise: String(support.groundingExercise || ""),
-      nextActions,
-    });
-  } catch (err: any) {
-    return NextResponse.json({ error: "Server error", details: String(err?.message ?? err) }, { status: 500 });
+    return NextResponse.json({ sessionId, reply, severity, escalated, plan, tasks, ticketId, ticketDebug });
+  } catch (e: any) {
+    return NextResponse.json({ error: "Server error", details: String(e?.message ?? e) }, { status: 500 });
   }
 }

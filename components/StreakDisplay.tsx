@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 
 interface StreakDisplayProps {
-  userEmail: string;
+  userId: string; // ✅ changed from userEmail
   streakType: string;
   size?: "small" | "medium" | "large";
   refreshKey?: number;
 }
 
 export default function StreakDisplay({
-  userEmail,
+  userId,
   streakType,
   size = "medium",
   refreshKey,
@@ -20,47 +20,61 @@ export default function StreakDisplay({
 
   useEffect(() => {
     loadStreak();
-  }, [userEmail, streakType, refreshKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, streakType, refreshKey]);
 
   const loadStreak = async () => {
-    if (!userEmail) return;
+    if (!userId) return;
 
+    setLoading(true);
     try {
-      const res = await fetch(`/api/streaks?user_email=${userEmail}`);
-      const data = await res.json();
-      if (res.ok) {
-        const typeStreak = data.streaks?.find(
-          (s: any) => s.streak_type === streakType,
-        );
-        setStreak(typeStreak);
+      const res = await fetch(`/api/streaks?user_id=${encodeURIComponent(userId)}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        console.error("Failed to load streak:", res.status, data);
+        setStreak(null);
+        return;
       }
+
+      const typeStreak = data.streaks?.find(
+        (s: any) => s.streak_type === streakType
+      );
+
+      setStreak(typeStreak || null);
     } catch (e) {
-      console.log("Failed to load streak");
+      console.error("Failed to load streak:", e);
+      setStreak(null);
     } finally {
       setLoading(false);
     }
   };
 
+  // Optional helper: can be used from other components if you want to “record activity”
   const updateStreak = async () => {
     try {
       const res = await fetch("/api/streaks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_email: userEmail,
+          user_id: userId,
           streak_type: streakType,
         }),
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setStreak(data.streak);
-        return data.streak;
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        console.error("Failed to update streak:", res.status, data);
+        return null;
       }
+
+      setStreak(data.streak);
+      return data.streak;
     } catch (e) {
-      console.log("Failed to update streak");
+      console.error("Failed to update streak:", e);
+      return null;
     }
-    return null;
   };
 
   const getFireEmoji = (count: number) => {
@@ -110,18 +124,21 @@ export default function StreakDisplay({
   return (
     <div className={`flex items-center ${getSizeClasses()}`}>
       <span className="text-lg mr-2">{getFireEmoji(currentCount)}</span>
+
       <div className="flex items-center gap-3">
         <div
           className={`px-3 py-1 bg-[rgba(37,150,190,0.08)] rounded-full ${getNumberSize()} text-[var(--brand-blue)]`}
         >
           {currentCount} day{currentCount !== 1 ? "s" : ""}
         </div>
+
         {bestCount > currentCount && size !== "small" && (
           <div className="text-xs text-[var(--text-muted)]">
             Best: {bestCount}
           </div>
         )}
       </div>
+
       {size === "large" && (
         <div className="text-xs text-[var(--text-muted)] ml-3">
           {streakType} streak

@@ -21,14 +21,16 @@ import {
 
 type RSVPStatus = "going" | "interested";
 type Visibility = "public" | "followers" | "circle";
+type ReminderKind = "1h" | "1d";
+type ReminderMap = Record<ReminderKind, boolean>;
 
 type EventRow = {
   id: string;
   title: string;
   description: string | null;
   category: string | null;
-  event_date: string; // date
-  event_time: string | null; // time
+  event_date: string; // YYYY-MM-DD
+  event_time: string | null; // HH:mm:ss or null
   duration: string | null;
   location: string | null;
   is_virtual: boolean | null;
@@ -59,7 +61,31 @@ const CATEGORY_PRESETS = [
   "Beach",
   "Music",
   "Support",
+  "Fun",
+  "Enjoyment",
 ] as const;
+
+function safeTime(t: string | null) {
+  return t ? t.slice(0, 5) : "—";
+}
+
+/**
+ * event over logic:
+ * - if event_time exists -> compare exact datetime
+ * - if no time -> treat end of day as 23:59:59
+ */
+function isEventOver(e: Pick<EventRow, "event_date" | "event_time">) {
+  const now = new Date();
+
+  if (e.event_time) {
+    const hhmm = e.event_time.slice(0, 5);
+    const dt = new Date(`${e.event_date}T${hhmm}:00`);
+    return dt.getTime() < now.getTime();
+  }
+
+  const endOfDay = new Date(`${e.event_date}T23:59:59`);
+  return endOfDay.getTime() < now.getTime();
+}
 
 export default function EventsPage() {
   const router = useRouter();
@@ -71,9 +97,9 @@ export default function EventsPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [myRSVPs, setMyRSVPs] = useState<Record<string, RSVPStatus>>({});
-  const [myReminders, setMyReminders] = useState<
-    Record<string, { "1h": boolean; "1d": boolean }>
-  >({});
+  const [myReminders, setMyReminders] = useState<Record<string, ReminderMap>>(
+    {}
+  );
 
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("All");
@@ -85,8 +111,6 @@ export default function EventsPage() {
 
   const attendeesShown = (e: EventRow) =>
     (e.attendees_count ?? e.attendees ?? 0) as number;
-
-  const safeTime = (t: string | null) => (t ? t.slice(0, 5) : "—");
 
   const fetchProfilesForOrganizers = useCallback(
     async (organizerIds: string[]) => {
@@ -124,9 +148,22 @@ export default function EventsPage() {
       return;
     }
 
-    const list = (res.data || []) as EventRow[];
-    setEvents(list);
-    fetchProfilesForOrganizers(list.map((e) => e.organizer));
+    // ✅ keep only upcoming (NOT over)
+    const upcoming = ((res.data || []) as EventRow[]).filter(
+      (e) => !isEventOver(e)
+    );
+
+    // ✅ sort by nearest datetime first
+    upcoming.sort((a, b) => {
+      const aTime = a.event_time ? a.event_time.slice(0, 5) : "00:00";
+      const bTime = b.event_time ? b.event_time.slice(0, 5) : "00:00";
+      const ad = new Date(`${a.event_date}T${aTime}:00`).getTime();
+      const bd = new Date(`${b.event_date}T${bTime}:00`).getTime();
+      return ad - bd;
+    });
+
+    setEvents(upcoming);
+    fetchProfilesForOrganizers(upcoming.map((e) => e.organizer));
   }, [supabase, fetchProfilesForOrganizers]);
 
   const loadMyRSVPs = useCallback(
@@ -142,7 +179,14 @@ export default function EventsPage() {
       }
 
       const map: Record<string, RSVPStatus> = {};
-      (res.data || []).forEach((r: any) => (map[r.event_id] = r.status));
+      (res.data || []).forEach((r: any) => {
+        if (
+          r?.event_id &&
+          (r.status === "going" || r.status === "interested")
+        ) {
+          map[r.event_id] = r.status;
+        }
+      });
       setMyRSVPs(map);
     },
     [supabase]
@@ -160,10 +204,16 @@ export default function EventsPage() {
         return;
       }
 
-      const map: Record<string, { "1h": boolean; "1d": boolean }> = {};
+      const map: Record<string, ReminderMap> = {};
       (res.data || []).forEach((r: any) => {
-        map[r.event_id] = map[r.event_id] || { "1h": false, "1d": false };
-        map[r.event_id][r.kind] = true;
+        const eventId: string | undefined = r?.event_id;
+        const kind: unknown = r?.kind;
+
+        if (!eventId) return;
+        if (kind !== "1h" && kind !== "1d") return; // ✅ TS-safe guard
+
+        map[eventId] = map[eventId] ?? { "1h": false, "1d": false };
+        map[eventId][kind] = true; // kind is narrowed to ReminderKind here
       });
 
       setMyReminders(map);
@@ -267,11 +317,15 @@ export default function EventsPage() {
     await loadMyRSVPs(userId);
   }
 
-  async function toggleReminder(event: EventRow, kind: "1h" | "1d") {
+  async function toggleReminder(event: EventRow, kind: ReminderKind) {
     if (!userId) return router.push("/login");
 
-    const current = myReminders[event.id] || { "1h": false, "1d": false };
-    const already = !!current[kind];
+    const current: ReminderMap = myReminders[event.id] ?? {
+      "1h": false,
+      "1d": false,
+    };
+
+    const already = current[kind];
 
     if (already) {
       const del = await supabase
@@ -323,13 +377,15 @@ export default function EventsPage() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return events.filter((e) => {
-      const text = `${e.title} ${e.description || ""} ${e.location || ""} ${(e.tags || []).join(
-        " "
-      )}`.toLowerCase();
+      const text = `${e.title} ${e.description || ""} ${
+        e.location || ""
+      } ${(e.tags || []).join(" ")}`.toLowerCase();
 
       const okSearch = text.includes(q);
       const okCat =
-        activeCategory === "All" ? true : (e.category || "") === activeCategory;
+        activeCategory === "All"
+          ? true
+          : (e.category || "") === activeCategory;
       const okTag =
         activeTag === "All" ? true : (e.tags || []).includes(activeTag);
 
@@ -353,7 +409,8 @@ export default function EventsPage() {
           <div>
             <h1 className="text-3xl font-bold">Community Events</h1>
             <p className="text-gray-600 text-sm mt-1">
-              Join wellness, study, and fun activities — with safe visibility controls.
+              Join wellness, study, and fun activities — with safe visibility
+              controls.
             </p>
           </div>
 
@@ -422,14 +479,17 @@ export default function EventsPage() {
         {/* Cards */}
         {filtered.length === 0 ? (
           <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
-            <p className="text-gray-600">No events match your filters.</p>
+            <p className="text-gray-600">No upcoming events found.</p>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map((event) => {
               const host = profilesMap[event.organizer];
               const rsvp = myRSVPs[event.id];
-              const remind = myReminders[event.id] || { "1h": false, "1d": false };
+              const remind: ReminderMap = myReminders[event.id] ?? {
+                "1h": false,
+                "1d": false,
+              };
 
               return (
                 <div
@@ -491,7 +551,9 @@ export default function EventsPage() {
                       </div>
 
                       <button
-                        onClick={() => router.push(`/profile/${event.organizer}`)}
+                        onClick={() =>
+                          router.push(`/profile/${event.organizer}`)
+                        }
                         className="text-xs text-blue-600 hover:underline"
                         type="button"
                       >

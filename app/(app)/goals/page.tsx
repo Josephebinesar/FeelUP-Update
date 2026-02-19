@@ -38,11 +38,9 @@ type Visibility = "public" | "followers" | "mutuals";
 
 type CompletedDraft = {
   goal: any;
-  mood: string; // completion_moods.value
+  mood: string;
   reflection: string;
 };
-
-/* -------------------- PAGE -------------------- */
 
 export default function GoalsPage() {
   const router = useRouter();
@@ -59,12 +57,12 @@ export default function GoalsPage() {
 
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
 
-  // ✅ prevent double click completes
+  // prevent double click completes
   const [completingIds, setCompletingIds] = useState<Record<string, boolean>>(
     {}
   );
 
-  // ✅ optional reflection modal after instant complete
+  // optional reflection modal after instant complete
   const [completionModal, setCompletionModal] = useState<CompletedDraft | null>(
     null
   );
@@ -77,6 +75,7 @@ export default function GoalsPage() {
   /* -------------------- HELPERS -------------------- */
 
   const todayISO = () => new Date().toISOString().split("T")[0];
+  const safeDate = selectedDate || todayISO();
 
   const completedGoals = goals.filter((g) => g.completed_at);
   const pendingGoals = goals.filter((g) => !g.completed_at);
@@ -114,19 +113,25 @@ export default function GoalsPage() {
   /* -------------------- LOAD GOALS -------------------- */
 
   const loadGoals = useCallback(
-    async (date = selectedDate) => {
+    async (date = safeDate) => {
       if (!user?.email) return;
 
       const res = await fetch(
-        `/api/goals?user_email=${encodeURIComponent(user.email)}&date=${date}`
+        `/api/goals?user_email=${encodeURIComponent(user.email)}&date=${encodeURIComponent(
+          date
+        )}`
       );
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("loadGoals failed:", res.status, text);
+        return;
+      }
 
       const data = await res.json();
       setGoals(data.goals || []);
     },
-    [user?.email, selectedDate]
+    [user?.email, safeDate]
   );
 
   useEffect(() => {
@@ -136,7 +141,7 @@ export default function GoalsPage() {
   /* -------------------- DATE -------------------- */
 
   const changeDateBy = async (days: number) => {
-    const d = new Date(selectedDate);
+    const d = new Date(safeDate);
     d.setDate(d.getDate() + days);
     const next = d.toISOString().split("T")[0];
     setSelectedDate(next);
@@ -151,20 +156,28 @@ export default function GoalsPage() {
 
     const fd = new FormData(e.currentTarget);
 
-    await fetch("/api/goals", {
+    const payload = {
+      user_email: user.email,
+      title: String(fd.get("title") || "").trim(),
+      description: String(fd.get("description") || "").trim(),
+      category: String(fd.get("category") || ""),
+      target_date: safeDate,
+    };
+
+    const res = await fetch("/api/goals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_email: user.email,
-        title: String(fd.get("title") || "").trim(),
-        description: String(fd.get("description") || "").trim(),
-        category: String(fd.get("category") || ""),
-        target_date: selectedDate,
-      }),
+      body: JSON.stringify(payload),
     });
 
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      alert(`Failed to add goal (${res.status}): ${text || "Unknown error"}`);
+      return;
+    }
+
     setShowAddGoal(false);
-    loadGoals(selectedDate);
+    await loadGoals(safeDate);
   };
 
   const addGoalsBulk = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -195,16 +208,20 @@ export default function GoalsPage() {
           title,
           description,
           category,
-          target_date: selectedDate,
+          target_date: safeDate,
         }),
       });
 
-      if (!res.ok) break;
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        alert(`Bulk add failed (${res.status}): ${text || "Unknown error"}`);
+        break;
+      }
     }
 
     setShowAddGoal(false);
     setBulkMode(false);
-    loadGoals(selectedDate);
+    await loadGoals(safeDate);
   };
 
   /* -------------------- DELETE GOAL -------------------- */
@@ -213,11 +230,20 @@ export default function GoalsPage() {
     if (!user?.email) return;
     if (!confirm("Delete this goal?")) return;
 
-    await fetch(`/api/goals?goal_id=${id}&user_email=${user.email}`, {
-      method: "DELETE",
-    });
+    const res = await fetch(
+      `/api/goals?goal_id=${encodeURIComponent(id)}&user_email=${encodeURIComponent(
+        user.email
+      )}`,
+      { method: "DELETE" }
+    );
 
-    loadGoals(selectedDate);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      alert(`Failed to delete (${res.status}): ${text || "Unknown error"}`);
+      return;
+    }
+
+    await loadGoals(safeDate);
   };
 
   /* -------------------- SHARE TO FEED -------------------- */
@@ -253,26 +279,43 @@ export default function GoalsPage() {
     if (error) throw new Error(error.message || "Failed to share to feed");
   };
 
-  /* -------------------- INSTANT COMPLETE (BEST UX) -------------------- */
+  /* -------------------- STREAK -------------------- */
 
-  const instantlyCompleteGoal = async (goal: any) => {
+  const recordGoalStreakActivity = async () => {
+    if (!user?.id) return;
+
+    const res = await fetch("/api/streaks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: user.id,
+        streak_type: "goals",
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn("streak update failed:", res.status, text);
+    }
+  };
+
+  /* -------------------- COMPLETE GOAL -------------------- */
+
+  const completeGoal = async (goal: any) => {
     if (!user?.email) return;
 
-    // block double click
     if (completingIds[goal.id]) return;
     setCompletingIds((p) => ({ ...p, [goal.id]: true }));
 
-    // optimistic UI: mark completed locally immediately
+    // optimistic UI
     setGoals((prev) =>
       prev.map((g) =>
         g.id === goal.id ? { ...g, completed_at: new Date().toISOString() } : g
       )
     );
 
-    // default mood for fast completion
     const defaultMood = "accomplished";
 
-    // save to DB
     const res = await fetch("/api/goals", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -292,19 +335,17 @@ export default function GoalsPage() {
     });
 
     if (!res.ok) {
-      // rollback optimistic update
-      alert("Failed to complete goal");
-      await loadGoals(selectedDate);
+      const text = await res.text().catch(() => "");
+      alert(`Failed to complete goal (${res.status}): ${text || "Unknown error"}`);
+      await loadGoals(safeDate);
       return;
     }
 
+    await recordGoalStreakActivity();
     setStreakRefreshKey((k) => k + 1);
 
-    // open optional reflection/share modal (user can skip)
     setCompletionModal({ goal, mood: defaultMood, reflection: "" });
-
-    // refresh list to be accurate
-    loadGoals(selectedDate);
+    await loadGoals(safeDate);
   };
 
   const saveReflectionAndShare = async () => {
@@ -312,8 +353,7 @@ export default function GoalsPage() {
 
     const { goal, mood, reflection } = completionModal;
 
-    // update reflection/mood in DB (goal already completed)
-    await fetch("/api/goals", {
+    const res = await fetch("/api/goals", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -325,6 +365,12 @@ export default function GoalsPage() {
       }),
     });
 
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      alert(`Failed to save (${res.status}): ${text || "Unknown error"}`);
+      return;
+    }
+
     if (shareToFeed) {
       try {
         await shareCompletedGoalToFeed(goal, mood, reflection);
@@ -333,13 +379,12 @@ export default function GoalsPage() {
       }
     }
 
-    // reset & close
     setCompletionModal(null);
     setShareToFeed(false);
     setShareVisibility("public");
     setShareAnonymous(false);
 
-    loadGoals(selectedDate);
+    await loadGoals(safeDate);
   };
 
   /* -------------------- UI -------------------- */
@@ -363,7 +408,7 @@ export default function GoalsPage() {
       <div className="grid grid-cols-3 gap-4 mb-8">
         <Stat icon={<Flame />} label="Streak">
           <StreakDisplay
-            userEmail={user.email}
+            userId={user.id}
             streakType="goals"
             refreshKey={streakRefreshKey}
           />
@@ -390,7 +435,7 @@ export default function GoalsPage() {
         <input
           type="date"
           className="border rounded px-2 py-1 bg-white"
-          value={selectedDate}
+          value={safeDate}
           onChange={(e) => {
             setSelectedDate(e.target.value);
             loadGoals(e.target.value);
@@ -453,6 +498,7 @@ export default function GoalsPage() {
                   </option>
                 ))}
               </select>
+
               <div className="flex gap-2">
                 <button
                   type="submit"
@@ -474,7 +520,9 @@ export default function GoalsPage() {
               <textarea
                 name="bulk"
                 required
-                placeholder={"Enter one goal per line:\nStudy DSA 30 mins\nWalk 15 mins\nDrink 2L water"}
+                placeholder={
+                  "Enter one goal per line:\nStudy DSA 30 mins\nWalk 15 mins\nDrink 2L water"
+                }
                 className="w-full border rounded px-3 py-2 min-h-[120px]"
               />
               <textarea
@@ -493,6 +541,7 @@ export default function GoalsPage() {
                   </option>
                 ))}
               </select>
+
               <div className="flex gap-2">
                 <button
                   type="submit"
@@ -528,13 +577,9 @@ export default function GoalsPage() {
           </div>
         ) : (
           pendingGoals.map((goal) => (
-            <button
+            <div
               key={goal.id}
-              type="button"
-              onClick={() => instantlyCompleteGoal(goal)}
-              disabled={!!completingIds[goal.id]}
-              className="w-full text-left bg-white p-4 rounded-xl border flex items-center justify-between mb-2 hover:bg-gray-50 disabled:opacity-60"
-              title="Click to complete instantly"
+              className="w-full bg-white p-4 rounded-xl border flex items-center justify-between mb-2"
             >
               <div>
                 <div className="font-medium">{goal.title}</div>
@@ -545,18 +590,30 @@ export default function GoalsPage() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteGoal(goal.id);
-                }}
-                className="p-2 rounded border bg-white hover:bg-gray-100"
-                title="Delete"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => completeGoal(goal)}
+                  disabled={!!completingIds[goal.id]}
+                  className={`px-3 py-1 rounded text-sm font-medium ${
+                    completingIds[goal.id]
+                      ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                      : "bg-green-600 text-white hover:bg-green-700"
+                  }`}
+                >
+                  ✓ Complete
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => deleteGoal(goal.id)}
+                  className="p-2 rounded border bg-white hover:bg-gray-100"
+                  title="Delete"
+                >
+                  <Trash2 className="w-4 h-4 text-red-500" />
+                </button>
+              </div>
+            </div>
           ))
         )}
       </div>
@@ -623,7 +680,6 @@ export default function GoalsPage() {
               }
             />
 
-            {/* Share to Mood Feed */}
             <div className="border rounded-lg p-3 bg-gray-50">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -667,7 +723,6 @@ export default function GoalsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  // skip modal (goal already completed)
                   setCompletionModal(null);
                   setShareToFeed(false);
                   setShareVisibility("public");

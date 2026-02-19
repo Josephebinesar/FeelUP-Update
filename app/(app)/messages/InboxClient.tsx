@@ -2,16 +2,15 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 
-type Profile = {
-  id: string;
-  full_name: string | null;
-  username: string | null;
-};
+type Profile = { id: string; full_name: string | null; username: string | null };
 
-type ChatRow = {
-  partner: Profile;
+type ThreadRow = {
+  conversation_id: string;
+  created_at: string;
+  partner: Profile | null;
   lastMessage: string;
   lastAt: string;
 };
@@ -21,11 +20,11 @@ export default function InboxClient() {
   const router = useRouter();
 
   const [meId, setMeId] = useState<string | null>(null);
-  const [chats, setChats] = useState<ChatRow[]>([]);
+  const [threads, setThreads] = useState<ThreadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
-  const logErr = (label: string, err: any) => {
+  const logErr = (label: string, err: any, extra?: any) => {
     const msg =
       (typeof err?.message === "string" && err.message) ||
       (typeof err === "string" && err) ||
@@ -34,6 +33,7 @@ export default function InboxClient() {
       (typeof err?.code === "string" && err.code) ||
       (typeof err?.status === "number" ? String(err.status) : "");
     console.error(`${label} ${code ? `[${code}]` : ""} ${msg}`);
+    if (extra !== undefined) console.error(label, "extra:", extra);
   };
 
   const timeAgo = (date: string) => {
@@ -42,6 +42,21 @@ export default function InboxClient() {
     if (diff < 3600) return `${Math.floor(diff / 60)}m`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
     return `${Math.floor(diff / 86400)}d`;
+  };
+
+  // ✅ Always return something meaningful
+  const displayName = (p: Profile | null) => {
+    if (!p) return "User";
+    const name = (p.full_name || "").trim();
+    if (name) return name;
+    if (p.username) return `@${p.username}`;
+    if (p.id) return `User (${p.id.slice(0, 6)})`;
+    return "User";
+  };
+
+  const displayHandle = (p: Profile | null) => {
+    if (!p?.username) return "";
+    return `@${p.username}`;
   };
 
   /* ---------- AUTH ---------- */
@@ -66,77 +81,113 @@ export default function InboxClient() {
     };
   }, [router, supabase]);
 
-  /* ---------- LOAD INBOX (latest message per partner) ---------- */
+  /* ---------- LOAD INBOX ---------- */
   const loadInbox = useCallback(async () => {
     if (!meId) return;
 
     setLoading(true);
 
-    // Get recent messages involving me (limit to keep it fast)
-    const { data: msgs, error: msgErr } = await supabase
-      .from("messages")
-      .select("id, sender_id, receiver_id, content, created_at")
-      .or(`sender_id.eq.${meId},receiver_id.eq.${meId}`)
-      .order("created_at", { ascending: false })
-      .limit(400);
+    // 1) all conversations I'm a member of
+    const { data: mems, error: memErr } = await supabase
+      .from("conversation_members")
+      .select(
+        `
+        conversation_id,
+        conversations:conversations (
+          id,
+          created_at
+        )
+      `
+      )
+      .eq("user_id", meId);
 
-    if (msgErr) {
-      logErr("Inbox load messages error:", msgErr);
+    if (memErr) {
+      logErr("Inbox load memberships error:", memErr);
       setLoading(false);
       return;
     }
 
-    const messages = msgs || [];
+    const convoIds = (mems || []).map((m: any) => m.conversation_id).filter(Boolean);
 
-    // Build map partnerId -> latest message
-    const latestByPartner = new Map<
-      string,
-      { lastMessage: string; lastAt: string }
-    >();
+    if (convoIds.length === 0) {
+      setThreads([]);
+      setLoading(false);
+      return;
+    }
 
-    for (const m of messages) {
-      const partnerId = m.sender_id === meId ? m.receiver_id : m.sender_id;
-      if (!partnerId) continue;
+    // 2) find partner user in each conversation (DM expects 2 members)
+    const { data: others, error: otherErr } = await supabase
+      .from("conversation_members")
+      .select("conversation_id, user_id")
+      .in("conversation_id", convoIds)
+      .neq("user_id", meId);
 
-      if (!latestByPartner.has(partnerId)) {
-        latestByPartner.set(partnerId, {
-          lastMessage: m.content || "",
-          lastAt: m.created_at,
-        });
+    if (otherErr) {
+      logErr("Inbox load other members error:", otherErr);
+      setLoading(false);
+      return;
+    }
+
+    const partnerIds = Array.from(new Set((others || []).map((r: any) => r.user_id).filter(Boolean)));
+
+    // 3) load partner profiles
+    let profilesById: Record<string, Profile> = {};
+    if (partnerIds.length > 0) {
+      const { data: profs, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, full_name, username")
+        .in("id", partnerIds);
+
+      if (profErr) {
+        // If you still see "User", this is usually RLS blocking
+        logErr("Inbox load profiles error:", profErr, { partnerIds });
+      } else {
+        profilesById = Object.fromEntries((profs || []).map((p: any) => [p.id, p]));
       }
     }
 
-    const partnerIds = Array.from(latestByPartner.keys());
-    if (partnerIds.length === 0) {
-      setChats([]);
-      setLoading(false);
-      return;
-    }
+    // Map conversation -> partner profile (or fallback with id only)
+    const partnerByConvo: Record<string, Profile | null> = {};
+    (others || []).forEach((r: any) => {
+      partnerByConvo[r.conversation_id] =
+        profilesById[r.user_id] ?? { id: r.user_id, full_name: null, username: null };
+    });
 
-    // Load partner profiles
-    const { data: profiles, error: profErr } = await supabase
-      .from("profiles")
-      .select("id, full_name, username")
-      .in("id", partnerIds);
+    // 4) last message per conversation
+    const { data: msgs, error: msgErr } = await supabase
+      .from("messages")
+      .select("conversation_id, body, created_at")
+      .in("conversation_id", convoIds)
+      .order("created_at", { ascending: false })
+      .limit(500);
 
-    if (profErr) {
-      logErr("Inbox load profiles error:", profErr);
-      setLoading(false);
-      return;
-    }
+    if (msgErr) logErr("Inbox load last messages error:", msgErr);
 
-    const byId: Record<string, Profile> = {};
-    (profiles || []).forEach((p) => (byId[p.id] = p));
+    const lastByConvo: Record<string, { body: string; created_at: string }> = {};
+    (msgs || []).forEach((m: any) => {
+      if (!lastByConvo[m.conversation_id]) {
+        lastByConvo[m.conversation_id] = { body: m.body || "", created_at: m.created_at };
+      }
+    });
 
-    const rows: ChatRow[] = partnerIds
-      .map((pid) => ({
-        partner: byId[pid] || { id: pid, full_name: null, username: null },
-        lastMessage: latestByPartner.get(pid)!.lastMessage,
-        lastAt: latestByPartner.get(pid)!.lastAt,
-      }))
-      .sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+    // 5) build rows
+    const rows: ThreadRow[] = (mems || []).map((m: any) => {
+      const c = m.conversations;
+      const cid = m.conversation_id;
+      const last = lastByConvo[cid];
 
-    setChats(rows);
+      return {
+        conversation_id: cid,
+        created_at: c?.created_at || new Date().toISOString(),
+        partner: partnerByConvo[cid] ?? null,
+        lastMessage: last?.body || "",
+        lastAt: last?.created_at || c?.created_at || new Date().toISOString(),
+      };
+    });
+
+    rows.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+
+    setThreads(rows);
     setLoading(false);
   }, [supabase, meId]);
 
@@ -144,22 +195,15 @@ export default function InboxClient() {
     if (meId) loadInbox();
   }, [meId, loadInbox]);
 
-  /* ---------- REALTIME: when any message insert involves me, refresh inbox ---------- */
+  /* ---------- REALTIME ---------- */
   useEffect(() => {
     if (!meId) return;
 
     const ch = supabase
       .channel(`realtime-inbox-${meId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        (payload) => {
-          const m = payload.new as any;
-          if (m.sender_id === meId || m.receiver_id === meId) {
-            loadInbox();
-          }
-        }
-      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => {
+        loadInbox();
+      })
       .subscribe();
 
     return () => {
@@ -167,26 +211,39 @@ export default function InboxClient() {
     };
   }, [supabase, meId, loadInbox]);
 
-  const filtered = chats.filter((c) => {
-    const name = `${c.partner.full_name || ""} ${c.partner.username || ""}`.toLowerCase();
-    return name.includes(search.toLowerCase());
+  /* ---------- FILTER ---------- */
+  const filtered = threads.filter((t) => {
+    const name = displayName(t.partner).toLowerCase();
+    const handle = displayHandle(t.partner).toLowerCase();
+    const q = search.toLowerCase().trim();
+    if (!q) return true;
+    return name.includes(q) || handle.includes(q);
   });
 
-  /* ---------- UI ---------- */
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-3xl mx-auto p-6">
         {/* Header */}
         <div className="bg-white border rounded-2xl p-6 mb-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">Messages</h1>
-            <button
-              onClick={() => loadInbox()}
-              className="text-sm px-3 py-2 rounded-xl border hover:bg-gray-50"
-              type="button"
-            >
-              Refresh
-            </button>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href="/messages/new"
+                className="text-sm bg-purple-600 text-white px-4 py-2 rounded-xl hover:bg-purple-700"
+              >
+                + New Chat
+              </Link>
+
+              <button
+                onClick={() => loadInbox()}
+                className="text-sm px-3 py-2 rounded-xl border hover:bg-gray-50"
+                type="button"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="mt-4">
@@ -206,60 +263,51 @@ export default function InboxClient() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="bg-white border rounded-2xl p-10 text-center">
-            <p className="text-gray-700 font-semibold">No conversations yet</p>
+            <p className="text-gray-900 font-semibold">No conversations yet</p>
             <p className="text-sm text-gray-500 mt-1">
-              Go to Explore and message someone.
+              Start chatting: click <span className="font-medium">+ New Chat</span>
             </p>
-            <button
-              onClick={() => router.push("/explore")}
-              className="mt-4 px-4 py-2 rounded-xl bg-purple-600 text-white hover:bg-purple-700"
-              type="button"
-            >
-              Go to Explore
-            </button>
+
+            <div className="mt-4">
+              <Link
+                href="/messages/new"
+                className="inline-flex text-sm bg-purple-600 text-white px-5 py-2.5 rounded-xl hover:bg-purple-700"
+              >
+                Start a New Chat
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">
-            {filtered.map((c) => {
-              const name =
-                c.partner.full_name || c.partner.username || "User";
-              const handle = c.partner.username ? `@${c.partner.username}` : "";
-              const initial = (name || "U").slice(0, 1).toUpperCase();
+            {filtered.map((t) => {
+              const name = displayName(t.partner);
+              const handle = displayHandle(t.partner);
+              const initial = (name || "U").replace("@", "").slice(0, 1).toUpperCase();
 
               return (
                 <button
-                  key={c.partner.id}
-                  onClick={() => router.push(`/messages/${c.partner.id}`)}
+                  key={t.conversation_id}
+                  onClick={() => router.push(`/messages/${t.conversation_id}`)}
                   className="w-full text-left bg-white border rounded-2xl p-4 hover:bg-gray-50 transition"
                   type="button"
                 >
                   <div className="flex items-center gap-3">
-                    {/* Avatar */}
                     <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center font-bold text-purple-700">
                       {initial}
                     </div>
 
-                    {/* Info */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="font-semibold text-gray-900 truncate">
-                            {name}
-                          </p>
-                          {handle && (
-                            <p className="text-xs text-gray-500 truncate">
-                              {handle}
-                            </p>
-                          )}
+                          <p className="font-semibold text-gray-900 truncate">{name}</p>
+                          {handle && <p className="text-xs text-gray-500 truncate">{handle}</p>}
                         </div>
 
-                        <span className="text-xs text-gray-500 shrink-0">
-                          {timeAgo(c.lastAt)}
-                        </span>
+                        <span className="text-xs text-gray-500 shrink-0">{timeAgo(t.lastAt)}</span>
                       </div>
 
                       <p className="text-sm text-gray-600 mt-1 truncate">
-                        {c.lastMessage || "—"}
+                        {t.lastMessage || "Say hi 👋"}
                       </p>
                     </div>
                   </div>

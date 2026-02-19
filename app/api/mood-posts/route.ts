@@ -1,173 +1,134 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import { v2 as cloudinary } from "cloudinary";
+import { createServerSupabaseClient } from "../../../lib/supabaseClient";
 
-// Mock database using JSON file for development
-const DB_PATH = path.join(process.cwd(), "data", "mood_posts.json");
-
-// Configure Cloudinary from env
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-function ensureDataDir() {
-  const dataDir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-}
-
-function readPosts() {
-  ensureDataDir();
-  if (!fs.existsSync(DB_PATH)) {
-    return [];
-  }
-  try {
-    const data = fs.readFileSync(DB_PATH, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-function writePosts(posts: any[]) {
-  ensureDataDir();
-  fs.writeFileSync(DB_PATH, JSON.stringify(posts, null, 2));
-}
+/**
+ * Table: mood_posts
+ * Expected columns (from your UI):
+ * id, content, mood, mood_emoji, mood_color, image_url,
+ * anonymous, visibility, owner_id, created_at,
+ * ai_detected, ai_confidence, ai_reason, energy_level
+ */
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const limit = parseInt(url.searchParams.get("limit") || "20", 10);
-    const visibility = url.searchParams.get("visibility") || "public";
-    const owner_email = url.searchParams.get("owner_email");
 
-    const allPosts = readPosts();
-    let filteredPosts = allPosts;
+    const limit = Number(url.searchParams.get("limit") || 20);
+    const visibility = (url.searchParams.get("visibility") || "public") as
+      | "public"
+      | "followers"
+      | "mutuals";
 
-    // Filter by visibility or owner
-    if (owner_email) {
-      // If owner_email specified, filter by that owner and then by visibility
-      filteredPosts = allPosts.filter((post: any) => post.owner_email === owner_email);
-      // If caller didn't request other visibility, only show public by default
-      if (visibility === "public") {
-        filteredPosts = filteredPosts.filter((post: any) => post.visibility === "public");
-      }
-    } else if (visibility === "public") {
-      filteredPosts = allPosts.filter((post: any) => post.visibility === "public");
+    const owner_id = url.searchParams.get("owner_id"); // optional: filter by owner
+    const supabase = createServerSupabaseClient();
+
+    let q = supabase
+      .from("mood_posts")
+      .select(
+        `
+        id,
+        content,
+        mood,
+        mood_emoji,
+        mood_color,
+        image_url,
+        anonymous,
+        visibility,
+        owner_id,
+        created_at,
+        ai_detected,
+        ai_confidence,
+        ai_reason,
+        energy_level
+      `
+      )
+      .order("created_at", { ascending: false })
+      .limit(Math.min(Math.max(limit, 1), 100));
+
+    // filters
+    if (owner_id) q = q.eq("owner_id", owner_id);
+    if (visibility) q = q.eq("visibility", visibility);
+
+    const { data, error } = await q;
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Sort by created_at descending and limit
-    filteredPosts.sort(
-      (a: any, b: any) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-    filteredPosts = filteredPosts.slice(0, limit);
-
-    return NextResponse.json({ posts: filteredPosts });
+    return NextResponse.json({ posts: data || [] }, { status: 200 });
   } catch (err: any) {
-    console.error("Mood posts GET error:", err);
     return NextResponse.json(
       { error: err?.message || String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
+
     const {
-  content,
-  mood,
-  mood_emoji,
-  mood_color,
-  anonymous,
-  owner_email,
+      owner_id,
+      content,
+      mood,
+      mood_emoji,
+      mood_color,
+      image_url,
+      anonymous,
+      visibility,
+      ai_detected,
+      ai_confidence,
+      ai_reason,
+      energy_level,
+    } = body || {};
 
-  image_base64,
-  image_name,
-  image_url,
-  reposted_from,
-
-  ai_detected,
-  ai_confidence,
-} = body || {};
-
-
-
-    if (!content || typeof content !== "string") {
-      return NextResponse.json({ error: "Missing content" }, { status: 400 });
+    if (!owner_id) {
+      return NextResponse.json({ error: "Missing owner_id" }, { status: 400 });
     }
 
-    const allPosts = readPosts();
-    const newPost = {
-  id: Date.now().toString(),
-  content: content.trim(),
+    // allow content to be empty, but not undefined
+    const safeContent = typeof content === "string" ? content.trim() : null;
 
-  mood: mood || null,
-  mood_emoji: mood_emoji || null,
-  mood_color: mood_color || null,
-
-  ai_detected: Boolean(ai_detected),
-  ai_confidence: Number(ai_confidence) || 0,
-
-  image_url: null,
-  reposted_from: reposted_from || null,
-
-  visibility: "public",
-  anonymous: !!anonymous,
-  owner_email: anonymous ? null : owner_email || null,
-  created_at: new Date().toISOString(),
-
-  profiles: anonymous
-    ? null
-    : {
-        full_name: owner_email?.split("@")[0] || "Anonymous User",
-        avatar_url: null,
-      },
-};
-
-
-
-    // If an image was provided as base64, upload to Cloudinary and set image_url
-    //if (image_base64 && image_name && process.env.CLOUDINARY_CLOUD_NAME) {
-      //try {
-        // Guess mime type from file extension
-        //const ext = path.extname(image_name).toLowerCase().replace(".", "");
-        //let mime = "image/png";
-        //if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
-        //else if (ext === "webp") mime = "image/webp";
-        //else if (ext === "gif") mime = "image/gif";
-
-        //const dataUri = `data:${mime};base64,${image_base64}`;
-        //const uploadRes = await cloudinary.uploader.upload(dataUri, {
-            //folder: "feelup/mood-posts",
-        //});
-        //newPost.image_url = uploadRes.secure_url;
-      //} catch (e) {
-        //console.error("Cloudinary upload failed:", e);
-      //}
-    //}
-
-    // If client provided an existing image_url (e.g., reposting), prefer that
-    if (!newPost.image_url && image_url) {
-      newPost.image_url = image_url;
+    if (!mood || !mood_emoji || !mood_color) {
+      return NextResponse.json(
+        { error: "Missing mood fields (mood, mood_emoji, mood_color)" },
+        { status: 400 }
+      );
     }
 
-    allPosts.push(newPost);
-    writePosts(allPosts);
+    const supabase = createServerSupabaseClient();
 
-    console.log("Mood post created successfully:", newPost);
-    return NextResponse.json({ post: newPost });
+    const payload: any = {
+      owner_id,
+      content: safeContent, // can be null
+      mood,
+      mood_emoji,
+      mood_color,
+      image_url: image_url || null,
+      anonymous: !!anonymous,
+      visibility: visibility || "public",
+      ai_detected: !!ai_detected,
+      ai_confidence: typeof ai_confidence === "number" ? ai_confidence : null,
+      ai_reason: typeof ai_reason === "string" ? ai_reason : null,
+      energy_level: typeof energy_level === "number" ? energy_level : null,
+    };
+
+    const { data, error } = await supabase
+      .from("mood_posts")
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ post: data }, { status: 200 });
   } catch (err: any) {
-    console.error("Mood posts POST error:", err);
     return NextResponse.json(
       { error: err?.message || String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -176,34 +137,67 @@ export async function PATCH(req: Request) {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
-    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const body = await req.json();
-    const { content, mood, mood_emoji, mood_color, owner_email } = body || {};
+    const body = await req.json().catch(() => ({}));
+    const { owner_id, content, mood, mood_emoji, mood_color, image_url, visibility } =
+      body || {};
 
-    const allPosts = readPosts();
-    const idx = allPosts.findIndex((p: any) => p.id === id);
-    if (idx === -1) return NextResponse.json({ error: "Post not found" }, { status: 404 });
-
-    const post = allPosts[idx];
-    // Basic ownership check: only allow update if owner_email matches and post is not anonymous
-    if (post.anonymous || !owner_email || post.owner_email !== owner_email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+    if (!owner_id) {
+      return NextResponse.json({ error: "Missing owner_id" }, { status: 400 });
     }
 
-    if (typeof content === "string") post.content = content.trim();
-    if (mood) post.mood = mood;
-    if (mood_emoji) post.mood_emoji = mood_emoji;
-    if (mood_color) post.mood_color = mood_color;
-    post.updated_at = new Date().toISOString();
+    const supabase = createServerSupabaseClient();
 
-    allPosts[idx] = post;
-    writePosts(allPosts);
+    // ownership check
+    const { data: existing, error: exErr } = await supabase
+      .from("mood_posts")
+      .select("id, owner_id, anonymous")
+      .eq("id", id)
+      .single();
 
-    return NextResponse.json({ post });
+    if (exErr || !existing) {
+      return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    }
+    if (existing.owner_id !== owner_id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (existing.anonymous) {
+      return NextResponse.json(
+        { error: "Anonymous posts cannot be edited" },
+        { status: 403 }
+      );
+    }
+
+    const updateData: any = {};
+    if (typeof content === "string") updateData.content = content.trim();
+    if (typeof mood === "string") updateData.mood = mood;
+    if (typeof mood_emoji === "string") updateData.mood_emoji = mood_emoji;
+    if (typeof mood_color === "string") updateData.mood_color = mood_color;
+    if (typeof image_url === "string" || image_url === null)
+      updateData.image_url = image_url;
+    if (typeof visibility === "string") updateData.visibility = visibility;
+
+    const { data, error } = await supabase
+      .from("mood_posts")
+      .update(updateData)
+      .eq("id", id)
+      .eq("owner_id", owner_id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ post: data }, { status: 200 });
   } catch (err: any) {
-    console.error("Mood posts PATCH error:", err);
-    return NextResponse.json({ error: err?.message || String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || String(err) },
+      { status: 500 }
+    );
   }
 }
 
@@ -211,25 +205,52 @@ export async function DELETE(req: Request) {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
-    const owner_email = url.searchParams.get("owner_email");
-    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    const owner_id = url.searchParams.get("owner_id");
 
-    const allPosts = readPosts();
-    const idx = allPosts.findIndex((p: any) => p.id === id);
-    if (idx === -1) return NextResponse.json({ error: "Post not found" }, { status: 404 });
-
-    const post = allPosts[idx];
-    if (post.anonymous || !owner_email || post.owner_email !== owner_email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+    if (!owner_id) {
+      return NextResponse.json({ error: "Missing owner_id" }, { status: 400 });
     }
 
-    // Remove post
-    allPosts.splice(idx, 1);
-    writePosts(allPosts);
+    const supabase = createServerSupabaseClient();
 
-    return NextResponse.json({ success: true });
+    // ownership check
+    const { data: existing, error: exErr } = await supabase
+      .from("mood_posts")
+      .select("id, owner_id, anonymous")
+      .eq("id", id)
+      .single();
+
+    if (exErr || !existing) {
+      return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    }
+    if (existing.owner_id !== owner_id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (existing.anonymous) {
+      return NextResponse.json(
+        { error: "Anonymous posts cannot be deleted" },
+        { status: 403 }
+      );
+    }
+
+    const { error } = await supabase
+      .from("mood_posts")
+      .delete()
+      .eq("id", id)
+      .eq("owner_id", owner_id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true }, { status: 200 });
   } catch (err: any) {
-    console.error("Mood posts DELETE error:", err);
-    return NextResponse.json({ error: err?.message || String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || String(err) },
+      { status: 500 }
+    );
   }
 }

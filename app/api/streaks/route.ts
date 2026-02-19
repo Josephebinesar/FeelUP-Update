@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "../../../lib/supabaseClient";
 
+/**
+ * GET /api/streaks?user_id=<uuid>
+ * Returns all streak rows for the user, normalized.
+ */
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const userEmail = url.searchParams.get("user_email");
+    const userId = url.searchParams.get("user_id");
 
-    if (!userEmail) {
-      return NextResponse.json(
-        { error: "Missing user_email" },
-        { status: 400 },
-      );
+    if (!userId) {
+      return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
     }
 
     const supabase = createServerSupabaseClient();
@@ -18,19 +19,25 @@ export async function GET(req: Request) {
     const { data, error } = await supabase
       .from("user_streaks")
       .select("*")
-      .eq("user_email", userEmail);
+      .eq("user_id", userId);
 
-    if (error)
+    if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    // Normalize returned rows to predictable fields
     const normalized = (data || []).map((row: any) => ({
       id: row.id,
-      user_email: row.user_email,
+      user_id: row.user_id,
       streak_type: row.streak_type,
-      current_count: Number(row.current_count || row.current_count === 0 ? row.current_count : row.currentCount || 0),
-      best_count: Number(row.best_count || row.best_count === 0 ? row.best_count : row.bestCount || 0),
-      last_activity_date: row.last_activity_date ? (new Date(row.last_activity_date)).toISOString().split("T")[0] : null,
+      current_count: Number(
+        row.current_count ?? row.currentCount ?? 0
+      ),
+      best_count: Number(
+        row.best_count ?? row.bestCount ?? 0
+      ),
+      last_activity_date: row.last_activity_date
+        ? new Date(row.last_activity_date).toISOString().split("T")[0]
+        : null,
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
@@ -39,100 +46,135 @@ export async function GET(req: Request) {
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
 
+/**
+ * POST /api/streaks
+ * Body: { user_id, streak_type, activity_date? }
+ * Records activity (increments streak if yesterday, no-op if already today).
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { user_email, streak_type, activity_date } = body || {};
+    const { user_id, streak_type, activity_date } = body || {};
 
-    if (!user_email || !streak_type) {
+    if (!user_id || !streak_type) {
       return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 },
+        { error: "Missing required fields: user_id, streak_type" },
+        { status: 400 }
       );
     }
 
     const supabase = createServerSupabaseClient();
+
     const today = activity_date || new Date().toISOString().split("T")[0];
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
       .toISOString()
       .split("T")[0];
 
-    // Get current streak data
-    const { data: currentStreak } = await supabase
+    // Get current streak row (single by unique key)
+    const { data: currentStreak, error: fetchErr } = await supabase
       .from("user_streaks")
       .select("*")
-      .eq("user_email", user_email)
+      .eq("user_id", user_id)
       .eq("streak_type", streak_type)
       .single();
+
+    // If it doesn't exist, Supabase sometimes returns an error for .single()
+    // We only treat it as fatal if it is NOT a "no rows" case.
+    if (fetchErr && !String(fetchErr.message || "").toLowerCase().includes("0 rows")) {
+      // Some clients have different messages; you can also log fetchErr here.
+      // We'll still proceed assuming no row.
+    }
 
     let newCount = 1;
     let bestCount = 1;
 
     if (currentStreak) {
       const lastActivityRaw = currentStreak.last_activity_date;
-      const lastActivity = lastActivityRaw ? new Date(lastActivityRaw).toISOString().split("T")[0] : null;
+      const lastActivity = lastActivityRaw
+        ? new Date(lastActivityRaw).toISOString().split("T")[0]
+        : null;
+
+      const currentCount = Number(currentStreak.current_count ?? currentStreak.currentCount ?? 0);
+      const currentBest = Number(currentStreak.best_count ?? currentStreak.bestCount ?? 0);
 
       if (lastActivity === today) {
         // Already recorded today, no change
-        const normalized = {
-          ...currentStreak,
-          current_count: Number(currentStreak.current_count || currentStreak.currentCount || 0),
-          best_count: Number(currentStreak.best_count || currentStreak.bestCount || 0),
-          last_activity_date: lastActivity,
-        };
-        return NextResponse.json({ streak: normalized });
+        return NextResponse.json({
+          streak: {
+            ...currentStreak,
+            current_count: currentCount,
+            best_count: currentBest,
+            last_activity_date: lastActivity,
+          },
+        });
       } else if (lastActivity === yesterday) {
         // Continuing streak
-        newCount = (currentStreak.current_count || currentStreak.currentCount || 0) + 1;
-        bestCount = Math.max(currentStreak.best_count || currentStreak.bestCount || 0, newCount);
+        newCount = currentCount + 1;
+        bestCount = Math.max(currentBest, newCount);
       } else {
-        // Streak broken, reset to 1
+        // Streak broken
         newCount = 1;
-        bestCount = currentStreak.best_count || currentStreak.bestCount || 0;
+        bestCount = currentBest;
       }
     }
 
-    // Update or insert streak
+    // Upsert by (user_id, streak_type) UNIQUE constraint you added
     const { data: streak, error } = await supabase
       .from("user_streaks")
-      .upsert({
-        user_email,
-        streak_type,
-        current_count: newCount,
-        best_count: bestCount,
-        last_activity_date: today,
-        updated_at: new Date().toISOString(),
-      })
+      .upsert(
+        {
+          user_id,
+          streak_type,
+          current_count: newCount,
+          best_count: bestCount,
+          last_activity_date: today,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,streak_type" }
+      )
       .select()
       .single();
 
-    if (error)
+    if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    // Check for achievements
-    await checkStreakAchievements(supabase, user_email, streak_type, newCount);
+    // Achievements (optional)
+    await checkStreakAchievements(supabase, user_id, streak_type, newCount);
 
     return NextResponse.json({ streak });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
 
+/**
+ * PATCH /api/streaks
+ * Body: { user_id, streak_type, action: "decrement", activity_date? }
+ * Used when a completed action is undone.
+ */
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { user_email, streak_type, action, activity_date } = body || {};
+    const { user_id, streak_type, action, activity_date } = body || {};
 
-    if (!user_email || !streak_type || !action) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    if (!user_id || !streak_type || !action) {
+      return NextResponse.json(
+        { error: "Missing required fields: user_id, streak_type, action" },
+        { status: 400 }
+      );
+    }
+
+    if (action !== "decrement") {
+      return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
     }
 
     const supabase = createServerSupabaseClient();
@@ -142,7 +184,7 @@ export async function PATCH(req: Request) {
     const { data: currentStreak, error: fetchErr } = await supabase
       .from("user_streaks")
       .select("*")
-      .eq("user_email", user_email)
+      .eq("user_id", user_id)
       .eq("streak_type", streak_type)
       .single();
 
@@ -154,66 +196,74 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Streak not found" }, { status: 404 });
     }
 
-    if (action === "decrement") {
-      // Only decrement if the last activity was recorded for the provided date
-      const lastActivityRaw = currentStreak.last_activity_date;
-      const lastActivity = lastActivityRaw ? new Date(lastActivityRaw).toISOString().split("T")[0] : null;
-      if (!lastActivity || lastActivity !== today) {
-        const normalized = {
+    const lastActivityRaw = currentStreak.last_activity_date;
+    const lastActivity = lastActivityRaw
+      ? new Date(lastActivityRaw).toISOString().split("T")[0]
+      : null;
+
+    const currentCount = Number(currentStreak.current_count ?? currentStreak.currentCount ?? 0);
+
+    // Only decrement if the last activity was recorded for today
+    if (!lastActivity || lastActivity !== today) {
+      return NextResponse.json({
+        streak: {
           ...currentStreak,
-          current_count: Number(currentStreak.current_count || currentStreak.currentCount || 0),
-          best_count: Number(currentStreak.best_count || currentStreak.bestCount || 0),
+          current_count: currentCount,
+          best_count: Number(currentStreak.best_count ?? currentStreak.bestCount ?? 0),
           last_activity_date: lastActivity,
-        };
-        return NextResponse.json({ streak: normalized });
-      }
-
-      const newCount = Math.max(0, (currentStreak.current_count || currentStreak.currentCount || 0) - 1);
-
-      // If we still have a streak, set last_activity_date to yesterday, otherwise null
-      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0];
-
-      const updatedLast = newCount > 0 ? yesterday : null;
-
-      const { data: updated, error: updateErr } = await supabase
-        .from("user_streaks")
-        .update({
-          current_count: newCount,
-          last_activity_date: updatedLast,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_email", user_email)
-        .eq("streak_type", streak_type)
-        .select()
-        .single();
-
-      if (updateErr) {
-        return NextResponse.json({ error: updateErr.message }, { status: 500 });
-      }
-
-      const normalizedUpdated = {
-        ...updated,
-        current_count: Number(updated.current_count || updated.currentCount || 0),
-        best_count: Number(updated.best_count || updated.bestCount || 0),
-        last_activity_date: updated.last_activity_date ? new Date(updated.last_activity_date).toISOString().split("T")[0] : null,
-      };
-
-      return NextResponse.json({ streak: normalizedUpdated });
+        },
+      });
     }
 
-    return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
+    const newCount = Math.max(0, currentCount - 1);
+
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    const updatedLast = newCount > 0 ? yesterday : null;
+
+    const { data: updated, error: updateErr } = await supabase
+      .from("user_streaks")
+      .update({
+        current_count: newCount,
+        last_activity_date: updatedLast,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user_id)
+      .eq("streak_type", streak_type)
+      .select()
+      .single();
+
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      streak: {
+        ...updated,
+        current_count: Number(updated.current_count ?? updated.currentCount ?? 0),
+        best_count: Number(updated.best_count ?? updated.bestCount ?? 0),
+        last_activity_date: updated.last_activity_date
+          ? new Date(updated.last_activity_date).toISOString().split("T")[0]
+          : null,
+      },
+    });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || String(err) },
+      { status: 500 }
+    );
   }
 }
 
+/* -------------------- ACHIEVEMENTS -------------------- */
+
 async function checkStreakAchievements(
   supabase: any,
-  userEmail: string,
+  userId: string,
   streakType: string,
-  count: number,
+  count: number
 ) {
   const milestones = [
     { days: 3, name: "Getting Started", emoji: "🌱" },
@@ -227,7 +277,7 @@ async function checkStreakAchievements(
   for (const milestone of milestones) {
     if (count === milestone.days) {
       await supabase.from("achievements").upsert({
-        user_email: userEmail,
+        user_id: userId,
         badge_type: "streak",
         badge_name: milestone.name,
         badge_emoji: milestone.emoji,

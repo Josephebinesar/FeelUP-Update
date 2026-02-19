@@ -14,12 +14,18 @@ function kindFromEmail(email: string): StaffKind | null {
   return null;
 }
 
+function kindBadge(kind: StaffKind) {
+  return kind === "admin"
+    ? "border-violet-200 bg-violet-50 text-violet-900"
+    : "border-sky-200 bg-sky-50 text-sky-900";
+}
+
 export default function AdminPage() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
-  const [meEmail, setMeEmail] = useState<string>("");
+  const [meEmail, setMeEmail] = useState("");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +34,7 @@ export default function AdminPage() {
   const [list, setList] = useState<StaffRow[]>([]);
   const [busy, setBusy] = useState(false);
 
-  async function requireAdmin() {
+  async function requireAdmin(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
     const u = data.session?.user ?? null;
 
@@ -52,19 +58,23 @@ export default function AdminPage() {
     const token = await requireAdmin();
     if (!token) return;
 
-    const res = await fetch("/api/admin/staff/list", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/staff/list", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-    const json = await res.json();
-    if (!res.ok) {
-      alert(json?.error || "Failed to load staff list");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(json?.error || "Failed to load staff list");
+        setList([]);
+        return;
+      }
+
+      setList((json?.items as StaffRow[]) ?? []);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setList((json?.items as StaffRow[]) ?? []);
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -81,7 +91,6 @@ export default function AdminPage() {
 
     if (!em || !pw) return alert("Please enter email + password.");
 
-    // enforce suffix matches selected kind
     const k = kindFromEmail(em);
     if (!k) return alert("Email must end with @admin.feelup or @psychologist.feelup");
     if (k !== kind) return alert(`Email suffix doesn't match selected type (${kind}).`);
@@ -97,7 +106,7 @@ export default function AdminPage() {
         body: JSON.stringify({ email: em, password: pw, kind }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) return alert(json?.error || "Create failed");
 
       setEmail("");
@@ -126,7 +135,7 @@ export default function AdminPage() {
         body: JSON.stringify({ userId }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) return alert(json?.error || "Delete failed");
 
       await loadList();
@@ -141,46 +150,70 @@ export default function AdminPage() {
     router.refresh();
   }
 
-  if (loading) return <div className="p-6">Loading…</div>;
+  if (loading) {
+    return <div className="min-h-screen bg-slate-50 p-6 text-slate-700">Loading…</div>;
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="bg-white border rounded-2xl p-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold">Admin Portal</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              Logged in as <b>{meEmail}</b>
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              Staff accounts must use email suffix:
-              {" "}
-              <b>@admin.feelup</b> or <b>@psychologist.feelup</b>
-            </p>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white px-4 py-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        {/* Header card */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.25)] flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-slate-900 text-white grid place-items-center text-sm font-semibold">
+                ADM
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl font-semibold text-slate-900">Admin Portal</h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Logged in as <b className="text-slate-900">{meEmail}</b>
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              Staff accounts must use: <b>@admin.feelup</b> or <b>@psychologist.feelup</b>
+            </div>
           </div>
 
           <button
             onClick={logout}
-            className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.99]"
             type="button"
           >
             Sign out
           </button>
         </div>
 
-        <div className="bg-white border rounded-2xl p-6">
-          <h2 className="font-semibold">Create staff account</h2>
+        {/* Create staff */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-slate-900">Create staff account</h2>
+              <p className="mt-1 text-sm text-slate-600">Only admin can create/delete. Staff emails must match suffix.</p>
+            </div>
 
-          <div className="mt-4 grid md:grid-cols-3 gap-3">
+            <button
+              onClick={loadList}
+              disabled={busy}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 active:scale-[0.99]"
+              type="button"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
             <input
-              className="rounded-xl border px-3 py-2 text-sm"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-4 focus:ring-slate-200"
               placeholder="shankar@psychologist.feelup"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
 
             <input
-              className="rounded-xl border px-3 py-2 text-sm"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-4 focus:ring-slate-200"
               placeholder="temporary password"
               type="password"
               value={password}
@@ -188,7 +221,7 @@ export default function AdminPage() {
             />
 
             <select
-              className="rounded-xl border px-3 py-2 text-sm"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-4 focus:ring-slate-200"
               value={kind}
               onChange={(e) => setKind(e.target.value as StaffKind)}
             >
@@ -197,30 +230,49 @@ export default function AdminPage() {
             </select>
           </div>
 
-          <button
-            disabled={busy}
-            onClick={createStaff}
-            className="mt-4 rounded-xl bg-blue-600 text-white px-4 py-2 text-sm disabled:opacity-60"
-          >
-            {busy ? "Working..." : "Create"}
-          </button>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              disabled={busy}
+              onClick={createStaff}
+              className="rounded-2xl bg-slate-900 text-white px-5 py-3 text-sm font-medium shadow-sm hover:bg-slate-800 active:scale-[0.99] disabled:opacity-60"
+              type="button"
+            >
+              {busy ? "Working..." : "Create"}
+            </button>
+
+            <div className="text-xs text-slate-500">
+              Tip: Use strong temporary password and ask staff to change after first login.
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white border rounded-2xl p-6">
-          <h2 className="font-semibold">Staff accounts</h2>
+        {/* Staff list */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold text-slate-900">Staff accounts</h2>
+            <span className="text-xs text-slate-500">{list.length} total</span>
+          </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-5 space-y-3">
             {list.map((r) => (
-              <div key={r.id} className="flex items-center justify-between rounded-xl border p-3">
-                <div>
-                  <div className="text-sm font-medium">{r.email}</div>
-                  <div className="text-xs text-gray-500">{r.kind}</div>
+              <div
+                key={r.id}
+                className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm flex items-center justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate">{r.email}</div>
+                  <div className="mt-2">
+                    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs ${kindBadge(r.kind)}`}>
+                      {r.kind}
+                    </span>
+                  </div>
                 </div>
 
                 <button
-                  className="text-sm text-red-600 hover:underline disabled:opacity-60"
+                  className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 active:scale-[0.99] disabled:opacity-60"
                   disabled={busy}
                   onClick={() => del(r.id)}
+                  type="button"
                 >
                   Delete
                 </button>
@@ -228,7 +280,9 @@ export default function AdminPage() {
             ))}
 
             {list.length === 0 ? (
-              <div className="text-sm text-gray-500">No staff accounts yet.</div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No staff accounts yet.
+              </div>
             ) : null}
           </div>
         </div>
