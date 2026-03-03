@@ -1,0 +1,16 @@
+═══════════════════════════════════════════════════════════════════
+  FeelUp Semantic Matching — Latency Report
+  Samples collected: 50/50 (0 failures)
+═══════════════════════════════════════════════════════════════════
+
+  Component           min    mean   p50    p95    max   (all ms)
+  ──────────────────────────────────────────────────────────────
+  L_embed (CF/HF)     348    536    510    629    2122   
+  L_ann   (HNSW)      164    231    199    312    706    
+  L_total (E2E)       556    804    747    1000   2609   
+
+  ──────────────────────────────────────────────────────────────
+  NOTE: L_embed includes Cloudflare OR HuggingFace network time.
+  A bimodal distribution in p95 vs p50 indicates fallback usage.
+  Paste p50 and p95 columns into IEEE Table V (Latency Breakdown).
+═══════════════════════════════════════════════════════════════════

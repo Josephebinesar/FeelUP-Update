@@ -1,0 +1,91 @@
+threshold,query_id,domain,matches_returned,zero_hit,avg_similarity_pct,max_similarity_pct,min_similarity_pct,latency_embed_ms,latency_ann_ms,latency_total_ms
+0.5,A01,Academic Stress,5,0,74.2,84,60,841,979,4293
+0.5,A02,Academic Stress,5,0,70.4,75,60,388,235,695
+0.5,A03,Academic Stress,5,0,75.6,85,64,398,178,613
+0.5,A04,Academic Stress,5,0,57.6,59,57,397,170,613
+0.5,A05,Academic Stress,5,0,64.8,70,61,528,150,841
+0.5,A06,Academic Stress,5,0,55.6,61,50,395,158,597
+0.5,A07,Academic Stress,5,0,58.8,64,54,402,173,601
+0.5,A08,Academic Stress,5,0,60.6,64,55,391,164,600
+0.5,A09,Academic Stress,5,0,63.2,64,63,388,158,584
+0.5,A10,Academic Stress,4,0,57.3,62,53,376,151,558
+0.5,B01,Emotional Distress,5,0,70.0,70,70,375,169,566
+0.5,B02,Emotional Distress,5,0,69.0,69,69,388,167,577
+0.5,B03,Emotional Distress,5,0,75.0,75,75,374,162,558
+0.5,B04,Emotional Distress,5,0,61.8,62,61,378,163,562
+0.5,B05,Emotional Distress,5,0,78.0,79,74,421,180,625
+0.5,B06,Emotional Distress,5,0,64.0,64,64,397,177,610
+0.5,B07,Emotional Distress,5,0,60.8,61,60,392,159,575
+0.5,B08,Emotional Distress,5,0,74.0,74,74,395,158,575
+0.5,B09,Emotional Distress,5,0,73.0,73,73,402,185,614
+0.5,B10,Emotional Distress,5,0,71.0,71,71,405,184,609
+0.5,C01,Social & Relational,5,0,70.0,70,70,826,179,1025
+0.5,C02,Social & Relational,5,0,59.2,67,56,404,200,624
+0.5,C03,Social & Relational,5,0,56.0,56,56,377,207,604
+0.5,C04,Social & Relational,5,0,64.6,66,63,393,213,626
+0.5,C05,Social & Relational,5,0,62.2,65,61,384,159,563
+0.5,C06,Social & Relational,5,0,79.0,79,79,548,184,752
+0.5,C07,Social & Relational,5,0,54.6,58,53,405,202,630
+0.5,C08,Social & Relational,5,0,67.0,67,67,386,198,606
+0.5,C09,Social & Relational,5,0,69.0,69,69,770,610,1402
+0.5,C10,Social & Relational,5,0,59.0,59,59,381,196,598
+0.65,A01,Academic Stress,4,0,77.8,84,73,460,193,679
+0.65,A02,Academic Stress,4,0,73.0,75,71,453,201,675
+0.65,A03,Academic Stress,4,0,78.5,85,72,383,165,570
+0.65,A04,Academic Stress,0,1,—,—,—,425,214,662
+0.65,A05,Academic Stress,3,0,67.3,70,65,384,176,591
+0.65,A06,Academic Stress,0,1,—,—,—,385,407,819
+0.65,A07,Academic Stress,0,1,—,—,—,422,243,685
+0.65,A08,Academic Stress,0,1,—,—,—,384,158,566
+0.65,A09,Academic Stress,0,1,—,—,—,426,255,701
+0.65,A10,Academic Stress,0,1,—,—,—,392,206,633
+0.65,B01,Emotional Distress,5,0,70.0,70,70,401,176,598
+0.65,B02,Emotional Distress,5,0,69.0,69,69,398,165,585
+0.65,B03,Emotional Distress,5,0,75.0,75,75,453,176,658
+0.65,B04,Emotional Distress,0,1,—,—,—,481,174,681
+0.65,B05,Emotional Distress,5,0,78.0,79,74,395,220,636
+0.65,B06,Emotional Distress,0,1,—,—,—,383,178,581
+0.65,B07,Emotional Distress,0,1,—,—,—,385,199,604
+0.65,B08,Emotional Distress,5,0,74.0,74,74,402,185,608
+0.65,B09,Emotional Distress,5,0,73.0,73,73,403,191,614
+0.65,B10,Emotional Distress,5,0,71.0,71,71,405,171,598
+0.65,C01,Social & Relational,5,0,70.0,70,70,385,178,583
+0.65,C02,Social & Relational,1,0,67.0,67,67,447,163,630
+0.65,C03,Social & Relational,0,1,—,—,—,404,154,582
+0.65,C04,Social & Relational,3,0,65.7,66,65,404,176,607
+0.65,C05,Social & Relational,1,0,65.0,65,65,401,184,610
+0.65,C06,Social & Relational,5,0,79.0,79,79,409,175,619
+0.65,C07,Social & Relational,0,1,—,—,—,373,175,569
+0.65,C08,Social & Relational,5,0,67.0,67,67,388,183,592
+0.65,C09,Social & Relational,5,0,69.0,69,69,414,202,636
+0.65,C10,Social & Relational,0,1,—,—,—,424,171,615
+0.8,A01,Academic Stress,1,0,84.0,84,84,375,157,556
+0.8,A02,Academic Stress,0,1,—,—,—,384,176,584
+0.8,A03,Academic Stress,1,0,85.0,85,85,426,195,645
+0.8,A04,Academic Stress,0,1,—,—,—,440,165,628
+0.8,A05,Academic Stress,0,1,—,—,—,394,169,584
+0.8,A06,Academic Stress,0,1,—,—,—,417,167,606
+0.8,A07,Academic Stress,0,1,—,—,—,401,178,599
+0.8,A08,Academic Stress,0,1,—,—,—,837,194,1052
+0.8,A09,Academic Stress,0,1,—,—,—,405,171,601
+0.8,A10,Academic Stress,0,1,—,—,—,370,174,563
+0.8,B01,Emotional Distress,0,1,—,—,—,370,176,571
+0.8,B02,Emotional Distress,0,1,—,—,—,406,170,597
+0.8,B03,Emotional Distress,0,1,—,—,—,370,189,578
+0.8,B04,Emotional Distress,0,1,—,—,—,391,165,576
+0.8,B05,Emotional Distress,0,1,—,—,—,434,187,655
+0.8,B06,Emotional Distress,0,1,—,—,—,637,222,1058
+0.8,B07,Emotional Distress,0,1,—,—,—,465,198,694
+0.8,B08,Emotional Distress,0,1,—,—,—,585,207,865
+0.8,B09,Emotional Distress,0,1,—,—,—,1186,316,1556
+0.8,B10,Emotional Distress,0,1,—,—,—,826,153,1009
+0.8,C01,Social & Relational,0,1,—,—,—,480,155,675
+0.8,C02,Social & Relational,0,1,—,—,—,595,192,815
+0.8,C03,Social & Relational,0,1,—,—,—,544,189,765
+0.8,C04,Social & Relational,0,1,—,—,—,446,187,660
+0.8,C05,Social & Relational,0,1,—,—,—,949,188,1170
+0.8,C06,Social & Relational,0,1,—,—,—,541,197,767
+0.8,C07,Social & Relational,0,1,—,—,—,726,186,959
+0.8,C08,Social & Relational,0,1,—,—,—,384,154,569
+0.8,C09,Social & Relational,0,1,—,—,—,1140,201,1364
+0.8,C10,Social & Relational,0,1,—,—,—,861,168,1060

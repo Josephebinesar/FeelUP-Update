@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
-import { BookOpen, Image as ImageIcon, Heart, Send } from "lucide-react";
+import { BookOpen, Heart } from "lucide-react";
 
 /* -------------------- CONSTANTS -------------------- */
 
@@ -25,15 +25,12 @@ const energyLevels = [
   { value: 5, emoji: "🚀" },
 ];
 
-type Tab = "journal" | "gratitude" | "mood_board";
+type Tab = "journal" | "gratitude";
 
 const tabMeta: Record<Tab, { title: string; icon: any; color: string }> = {
   journal: { title: "Feel Journal", icon: BookOpen, color: "bg-blue-500" },
   gratitude: { title: "Gratitude Notes", icon: Heart, color: "bg-green-500" },
-  mood_board: { title: "Mood Board", icon: ImageIcon, color: "bg-purple-500" },
 };
-
-/* -------------------- PAGE -------------------- */
 
 export default function JournalPage() {
   const router = useRouter();
@@ -41,59 +38,27 @@ export default function JournalPage() {
 
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
-
+  const [items, setItems] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("journal");
   const [adding, setAdding] = useState(false);
-
-  const [items, setItems] = useState<any[]>([]);
-
-  // mood tag + energy
   const [selectedMood, setSelectedMood] = useState<any>(null);
   const [energyLevel, setEnergyLevel] = useState<number | null>(null);
-
-  // mood board image
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-
   const [saving, setSaving] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
-
-  const logErr = (label: string, err: any) => {
-    const msg =
-      (typeof err?.message === "string" && err.message) ||
-      (typeof err === "string" && err) ||
-      "Unknown error";
-    const code =
-      (typeof err?.code === "string" && err.code) ||
-      (typeof err?.status === "number" ? String(err.status) : "");
-    console.error(`${label} ${code ? `[${code}]` : ""} ${msg}`);
-  };
 
   /* -------------------- AUTH -------------------- */
 
   useEffect(() => {
-    let mounted = true;
-
     async function init() {
-      const { data, error } = await supabase.auth.getUser();
-      if (!mounted) return;
-
-      if (error) logErr("AUTH getUser error:", error);
-
+      const { data } = await supabase.auth.getUser();
       if (!data?.user) {
         router.replace("/login");
         return;
       }
-
       setUser(data.user);
       setLoading(false);
     }
-
     init();
-    return () => {
-      mounted = false;
-    };
   }, [router, supabase]);
 
   /* -------------------- LOAD ITEMS -------------------- */
@@ -104,13 +69,13 @@ export default function JournalPage() {
     const { data, error } = await supabase
       .from("journal_entries")
       .select(
-        "id, user_id, entry_type, title, content, mood, mood_emoji, energy_level, image_url, converted_to_post, created_at"
+        "id, entry_type, title, content, mood_tag, mood_emoji, energy_level, created_at"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
-      logErr("LOAD journal_entries error:", error);
+      console.error("LOAD journal_entries error:", error);
       return;
     }
 
@@ -121,135 +86,41 @@ export default function JournalPage() {
     if (user) loadItems();
   }, [user, loadItems]);
 
-  /* -------------------- REALTIME -------------------- */
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const ch = supabase
-      .channel("realtime-journal")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "journal_entries" },
-        () => loadItems()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [supabase, user?.id, loadItems]);
-
   /* -------------------- ADD ITEM -------------------- */
 
   const addItem = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!user?.id) return;
-    if (saving) return;
+    if (!user?.id || saving) return;
 
     setSaving(true);
 
-    try {
-      const fd = new FormData(e.currentTarget);
+    const fd = new FormData(e.currentTarget);
 
-      let image_url: string | null = null;
+    const payload = {
+      user_id: user.id,
+      entry_type: activeTab,
+      title: activeTab === "journal" ? fd.get("title") : null,
+      content: fd.get("content"),
+      mood_tag: selectedMood?.label ?? null,
+      mood_emoji: selectedMood?.emoji ?? null,
+      energy_level: energyLevel,
+    };
 
-      // mood_board supports images
-      if (activeTab === "mood_board" && imageFile) {
-        const path = `${user.id}/${Date.now()}_${imageFile.name}`;
-        const up = await supabase.storage
-          .from("mood-images")
-          .upload(path, imageFile, { upsert: false });
+    const { error } = await supabase.from("journal_entries").insert(payload);
 
-        if (up.error) {
-          alert("Image upload failed: " + up.error.message);
-          logErr("Mood board upload error:", up.error);
-          return;
-        }
-
-        image_url = supabase.storage
-          .from("mood-images")
-          .getPublicUrl(up.data.path).data.publicUrl;
-      }
-
-      const payload: any = {
-        user_id: user.id,
-        entry_type: activeTab,
-        title: activeTab === "journal" ? fd.get("title") : null,
-        content: fd.get("content"),
-        mood: selectedMood?.label ?? null,
-        mood_emoji: selectedMood?.emoji ?? null,
-        energy_level: energyLevel,
-        image_url,
-      };
-
-      const { error } = await supabase.from("journal_entries").insert(payload);
-      if (error) {
-        alert(error.message || "Failed to save");
-        logErr("INSERT journal_entries error:", error);
-        return;
-      }
-
-      // reset UI
+    if (error) {
+      alert(error.message);
+      console.error("INSERT error:", error);
+    } else {
       setAdding(false);
       setSelectedMood(null);
       setEnergyLevel(null);
-      setImageFile(null);
-      if (imagePreview) URL.revokeObjectURL(imagePreview);
-      setImagePreview(null);
       formRef.current?.reset();
-
       loadItems();
-    } finally {
-      setSaving(false);
     }
+
+    setSaving(false);
   };
-
-  /* -------------------- CONVERT TO POST -------------------- */
-
-  const convertToPost = async (entry: any) => {
-    if (!user?.id) return;
-
-    const content = entry.content?.trim();
-    if (!content) {
-      alert("Nothing to post.");
-      return;
-    }
-
-    const { error } = await supabase.from("mood_posts").insert({
-      owner_id: user.id,
-      content,
-      mood: entry.mood ?? "Thoughtful",
-      mood_emoji: entry.mood_emoji ?? "🤔",
-      mood_color: "#a78bfa",
-      image_url: entry.image_url ?? null,
-      anonymous: false,
-      visibility: "public",
-      ai_detected: false,
-      ai_confidence: null,
-      ai_reason: null,
-      repost_of: null,
-    });
-
-    if (error) {
-      alert(error.message || "Failed to convert to post");
-      logErr("convertToPost insert error:", error);
-      return;
-    }
-
-    // mark converted
-    const upd = await supabase
-      .from("journal_entries")
-      .update({ converted_to_post: true })
-      .eq("id", entry.id);
-
-    if (upd.error) logErr("mark converted error:", upd.error);
-
-    alert("Posted to Mood Feed ✅");
-    loadItems();
-  };
-
-  /* -------------------- UI -------------------- */
 
   if (loading) {
     return (
@@ -271,13 +142,10 @@ export default function JournalPage() {
 
       {/* Tabs */}
       <div className="flex gap-3 mb-6">
-        {(["journal", "gratitude", "mood_board"] as Tab[]).map((t) => (
+        {(["journal", "gratitude"] as Tab[]).map((t) => (
           <button
             key={t}
-            onClick={() => {
-              setActiveTab(t);
-              setAdding(false);
-            }}
+            onClick={() => setActiveTab(t)}
             className={`px-4 py-2 rounded ${
               activeTab === t ? `${tabMeta[t].color} text-white` : "bg-gray-200"
             }`}
@@ -287,25 +155,15 @@ export default function JournalPage() {
         ))}
       </div>
 
-      {/* Optional Reminder note */}
-      {activeTab === "gratitude" && (
-        <div className="bg-white border rounded p-4 mb-6 text-sm text-gray-600">
-          💌 Tip: write <b>one thing</b> per day you’re grateful for. (We can add
-          reminders later using notifications.)
-        </div>
-      )}
-
-      {/* Add */}
       {!adding && (
         <button
           onClick={() => setAdding(true)}
           className="mb-6 px-4 py-2 bg-purple-500 text-white rounded"
         >
-          + Add {activeTab === "mood_board" ? "Mood Card" : "Entry"}
+          + Add Entry
         </button>
       )}
 
-      {/* Form */}
       {adding && (
         <form
           ref={formRef}
@@ -322,14 +180,12 @@ export default function JournalPage() {
 
           <textarea
             name="content"
+            required
             placeholder={
               activeTab === "gratitude"
                 ? "One thing I’m grateful for today…"
-                : activeTab === "mood_board"
-                ? "Quote / feeling / note…"
                 : "Write your private note…"
             }
-            required
             className="w-full border p-2 rounded h-32"
           />
 
@@ -341,9 +197,10 @@ export default function JournalPage() {
                 type="button"
                 onClick={() => setSelectedMood(m)}
                 className={`px-3 py-1 rounded ${
-                  selectedMood?.label === m.label ? "bg-blue-200" : "bg-gray-100"
+                  selectedMood?.label === m.label
+                    ? "bg-blue-200"
+                    : "bg-gray-100"
                 }`}
-                title={m.label}
               >
                 {m.emoji}
               </button>
@@ -358,107 +215,42 @@ export default function JournalPage() {
                 type="button"
                 onClick={() => setEnergyLevel(lvl.value)}
                 className={`px-3 py-1 rounded ${
-                  energyLevel === lvl.value ? "bg-green-200" : "bg-gray-100"
+                  energyLevel === lvl.value
+                    ? "bg-green-200"
+                    : "bg-gray-100"
                 }`}
-                title={`Energy ${lvl.value}`}
               >
                 {lvl.emoji}
               </button>
             ))}
           </div>
 
-          {/* Mood Board image */}
-          {activeTab === "mood_board" && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                className="text-sm border px-3 py-2 rounded"
-              >
-                Add Image (optional)
-              </button>
-
-              <input
-                ref={imageInputRef}
-                type="file"
-                className="hidden"
-                accept="image/*"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) {
-                    setImageFile(f);
-                    if (imagePreview) URL.revokeObjectURL(imagePreview);
-                    setImagePreview(URL.createObjectURL(f));
-                  }
-                }}
-              />
-            </div>
-          )}
-
-          {imagePreview && (
-            <img src={imagePreview} className="rounded-lg max-h-64" alt="preview" />
-          )}
-
-          <div className="flex gap-2">
-            <button
-              disabled={saving}
-              className="bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded"
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAdding(false);
-                setSelectedMood(null);
-                setEnergyLevel(null);
-                setImageFile(null);
-                if (imagePreview) URL.revokeObjectURL(imagePreview);
-                setImagePreview(null);
-              }}
-              className="bg-gray-200 px-4 py-2 rounded"
-            >
-              Cancel
-            </button>
-          </div>
+          <button
+            disabled={saving}
+            className="bg-blue-500 text-white px-4 py-2 rounded"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
         </form>
       )}
 
-      {/* Items */}
       {visible.length === 0 && (
         <div className="text-sm text-gray-400">No entries yet.</div>
       )}
 
       {visible.map((e) => (
         <div key={e.id} className="bg-white p-4 rounded mb-4">
-          <div className="text-sm text-gray-500 flex items-center justify-between">
-            <span>{new Date(e.created_at).toLocaleString()}</span>
-            <span className="text-xs text-gray-400 flex gap-2 items-center">
-              {e.mood_emoji ? <span title={e.mood}>{e.mood_emoji}</span> : null}
-              {e.energy_level ? <span>⚡{e.energy_level}/5</span> : null}
-            </span>
+          <div className="text-sm text-gray-500">
+            {new Date(e.created_at).toLocaleString()}
           </div>
 
-          {e.title ? <h3 className="font-semibold mt-2">{e.title}</h3> : null}
-
-          {e.image_url ? (
-            <img src={e.image_url} className="mt-3 rounded-lg" alt="mood" />
-          ) : null}
+          {e.title && <h3 className="font-semibold mt-2">{e.title}</h3>}
 
           <p className="mt-2 whitespace-pre-wrap">{e.content}</p>
 
-          {/* Convert note into post */}
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              onClick={() => convertToPost(e)}
-              disabled={e.converted_to_post}
-              className="text-xs border px-3 py-1 rounded flex items-center gap-1 disabled:opacity-50"
-              type="button"
-              title="Convert into a public mood post"
-            >
-              <Send className="w-3 h-3" />
-              {e.converted_to_post ? "Posted ✅" : "Post to Mood Feed"}
-            </button>
+          <div className="text-sm text-gray-400 mt-2 flex gap-2">
+            {e.mood_emoji && <span>{e.mood_emoji}</span>}
+            {e.energy_level && <span>⚡{e.energy_level}/5</span>}
           </div>
         </div>
       ))}

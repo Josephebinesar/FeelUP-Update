@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "../../../lib/supabaseClient";
+import { generateEmbedding } from "@/lib/embeddings";
 
 /**
  * Table: mood_posts
@@ -122,6 +123,31 @@ export async function POST(req: Request) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // ── ML: Generate and store semantic embedding (non-blocking)
+    // Uses Cloudflare Worker primary → HuggingFace BAAI/bge-base-en-v1.5 fallback.
+    // If both fail the post is still saved — graceful degradation.
+    if (safeContent && safeContent.length >= 5) {
+      const embedText = `${mood}: ${safeContent}`;
+
+      // Fire-and-forget — do NOT await (user gets instant response)
+      generateEmbedding(embedText)
+        .then(async (embedding) => {
+          if (!embedding) return;
+          const { error: embErr } = await supabase
+            .from("mood_posts")
+            .update({ embedding: embedding as any })
+            .eq("id", data.id);
+          if (embErr) {
+            console.warn("[mood-posts] Embedding update failed:", embErr.message);
+          } else {
+            console.log(`[mood-posts] ✅ Embedding stored for post ${data.id}`);
+          }
+        })
+        .catch((e) => {
+          console.warn("[mood-posts] Background embedding non-fatal error:", e?.message);
+        });
     }
 
     return NextResponse.json({ post: data }, { status: 200 });

@@ -1,72 +1,31 @@
-"use client";
+import { NextResponse } from "next/server";
+import { createServerSupabaseClient } from "@/lib/supabaseClient";
 
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
+export async function GET(request: Request) {
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get("email");
 
-interface Profile {
-  email: string;
-  full_name: string | null;
-  bio: string | null;
-  privacy_level: string | null;
-  theme: string | null;
-}
-
-export default function ProfilePage() {
-  const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
-
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const loadProfile = useCallback(async () => {
-    const { data } = await supabase.auth.getUser();
-
-    if (!data.user) {
-      router.replace("/login");
-      return;
+    if (!email) {
+        return NextResponse.json(
+            { error: "Email parameter is required" },
+            { status: 400 }
+        );
     }
 
-    const res = await fetch(
-      `/api/profile?email=${encodeURIComponent(data.user.email!)}`,
-    );
+    const supabase = createServerSupabaseClient();
 
-    const json = await res.json();
-    setProfile(json.profile ?? null);
-    setLoading(false);
-  }, [router, supabase]);
+    // Query the profile by email
+    // Note: Using service role key bypasses RLS, so this endpoint returns data for any email provided.
+    // In a real production scenario, consistent RLS or checking the auth session is recommended.
+    const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("email", email)
+        .single();
 
-  useEffect(() => {
-    loadProfile();
-  }, [loadProfile]);
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        Loading profile…
-      </div>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        Profile not found
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 px-4 py-10">
-      <div className="max-w-xl mx-auto bg-white rounded-xl shadow p-6">
-        <h1 className="text-2xl font-bold mb-4">My Profile</h1>
-
-        <p><b>Email:</b> {profile.email}</p>
-        <p><b>Name:</b> {profile.full_name ?? "—"}</p>
-        <p><b>Bio:</b> {profile.bio ?? "—"}</p>
-        <p><b>Privacy:</b> {profile.privacy_level ?? "public"}</p>
-        <p><b>Theme:</b> {profile.theme ?? "default"}</p>
-      </div>
-    </div>
-  );
+    return NextResponse.json({ profile });
 }

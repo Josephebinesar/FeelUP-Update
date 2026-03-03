@@ -1,0 +1,54 @@
+═══════════════════════════════════════════════════════════════
+   FeelUp Semantic Peer Matching — Evaluation Metrics Report
+═══════════════════════════════════════════════════════════════
+
+[A01] Results: 5 | Relevant: 5 | P@5 = 1.00
+[A02] Results: 5 | Relevant: 5 | P@5 = 1.00
+[A03] Results: 5 | Relevant: 5 | P@5 = 1.00
+[A04] Zero hits → P@5 = 0.00
+[A05] Results: 5 | Relevant: 5 | P@5 = 1.00
+[A06] Results: 1 | Relevant: 1 | P@5 = 1.00
+[A07] Results: 2 | Relevant: 2 | P@5 = 1.00
+[A08] Results: 3 | Relevant: 3 | P@5 = 1.00
+[A09] Results: 5 | Relevant: 5 | P@5 = 1.00
+[A10] Results: 1 | Relevant: 1 | P@5 = 1.00
+[B01] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B02] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B03] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B04] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B05] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B06] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B07] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B08] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B09] Results: 5 | Relevant: 5 | P@5 = 1.00
+[B10] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C01] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C02] Results: 1 | Relevant: 1 | P@5 = 1.00
+[C03] Zero hits → P@5 = 0.00
+[C04] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C05] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C06] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C07] Zero hits → P@5 = 0.00
+[C08] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C09] Results: 5 | Relevant: 5 | P@5 = 1.00
+[C10] Zero hits → P@5 = 0.00
+
+───────────────────────────────────────────────────────────────
+  OVERALL RESULTS
+───────────────────────────────────────────────────────────────
+  Total queries           : 30
+  Zero-hit queries        : 4 (13.3%)
+  Overall Precision@5    : 0.8667
+  Average Cosine Sim.     : 0.6890  (raw score 0–1)
+  Cohen's Kappa (κ)       : 1
+
+───────────────────────────────────────────────────────────────
+  PER-DOMAIN BREAKDOWN
+───────────────────────────────────────────────────────────────
+  Academic Stress           P@5: 0.9000   ACS: 0.6803
+  Emotional Distress        P@5: 1.0000   ACS: 0.6966
+  Social & Relational       P@5: 0.7000   ACS: 0.6858
+
+═══════════════════════════════════════════════════════════════
+  Paste these numbers into IEEE Table II (Evaluation Results)
+═══════════════════════════════════════════════════════════════

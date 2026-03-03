@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import Navbar from "@/components/Navbar";
+import PeerMatch from "@/components/PeerMatch";
 import {
   Users,
   Sparkles,
@@ -547,6 +548,9 @@ export default function CommunityPage() {
                   </div>
                 </div>
               </GlassPanel>
+
+              {/* ── ML: Semantic Peer Matching ── */}
+              <PeerMatch userId={me?.id ?? ""} />
 
               <GlassPanel>
                 <div className="p-5">
