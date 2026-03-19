@@ -18,12 +18,26 @@ const USER_APP_PREFIXES = [
   "/messages",
   "/analytics",
   "/ai-buddy",
+  // ✅ Additional protected user routes
+  "/profile",
+  "/settings",
+  "/achievements",
+  "/notifications",
+  "/saved",
+  "/psych-chat",
+  "/schedule-call",
+  "/create",
+  "/post",
+  "/support/waiting",
 ];
 
 const ADMIN_PREFIXES = ["/admin"];
 const PSY_PREFIXES = ["/psychologist"];
 
-const PUBLIC_PREFIXES = ["/login", "/privacy", "/terms", "/about", "/support", "/"];
+// ✅ Only truly public pages — /support/waiting is auth-protected
+const PUBLIC_PREFIXES = ["/login", "/privacy", "/terms", "/about", "/community-guidelines", "/"];
+// Note: /support (the help/FAQ page) is kept public; /support/waiting needs auth
+// We handle /support/waiting via USER_APP_PREFIXES above
 
 function startsWithAny(pathname: string, prefixes: string[]) {
   return prefixes.some((p) => pathname === p || pathname.startsWith(p + "/"));

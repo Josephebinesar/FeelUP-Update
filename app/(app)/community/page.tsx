@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabaseClient";
 import Navbar from "@/components/Navbar";
 import PeerMatch from "@/components/PeerMatch";
+import CreateCircleModal from "@/components/CreateCircleModal";
 import {
   Users,
   Sparkles,
@@ -159,6 +160,7 @@ export default function CommunityPage() {
 
   const [tab, setTab] = useState<Tab>("overview");
   const [query, setQuery] = useState("");
+  const [showCircleModal, setShowCircleModal] = useState(false);
 
   const [circles, setCircles] = useState<Circle[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -335,6 +337,13 @@ export default function CommunityPage() {
       <Navbar />
 
       {toast && <Toast msg={toast} onClose={() => setToast(null)} />}
+
+      {showCircleModal && (
+        <CreateCircleModal
+          onClose={() => setShowCircleModal(false)}
+          onCreated={(id) => router.push(`/community/circles/${id}`)}
+        />
+      )}
 
       <main className="max-w-7xl mx-auto px-4 py-10">
         {/* Header */}
@@ -655,7 +664,7 @@ export default function CommunityPage() {
               </div>
 
               <button
-                onClick={() => showToast("Create Challenge UI coming next ✅")}
+                onClick={() => router.push("/community/challenges/new")}
                 className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-700 to-indigo-700 text-white text-sm font-bold shadow-[0_16px_50px_-25px_rgba(88,28,135,0.6)] hover:brightness-110"
                 type="button"
               >
